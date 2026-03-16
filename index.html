@@ -1676,7 +1676,7 @@ ${aiForm.extras?`- Info adicional: ${aiForm.extras}`:""}
 
 Crea actividades variadas y realistas para cada día (desayuno, visitas, comidas, cenas, transporte). Usa fechas reales empezando desde hoy si no se especifican. Solo responde con el JSON, nada más.`;
 
-                        const res=await fetch("https://api.anthropic.com/v1/messages",{
+                        const res=await fetch("https://wdsaxxgfpfoetsqozjuo.supabase.co/functions/v1/claude-proxy",{
                           method:"POST",
                           headers:{"Content-Type":"application/json"},
                           body:JSON.stringify({
