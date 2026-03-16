@@ -1,0 +1,2496 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no"/>
+  <meta name="mobile-web-app-capable" content="yes"/>
+  <meta name="apple-mobile-web-app-capable" content="yes"/>
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+  <meta name="apple-mobile-web-app-title" content="Mis Viajes"/>
+  <meta name="theme-color" content="#0F0E17"/>
+  <title>Mis Viajes ✈️</title>
+  <style>
+    *{-webkit-tap-highlight-color:transparent;box-sizing:border-box;margin:0;padding:0}
+    html,body{background:#0F0E17;min-height:100%;overscroll-behavior:none;font-family:-apple-system,'Helvetica Neue',sans-serif;color:#FFFFFE}
+    body{padding-top:env(safe-area-inset-top);padding-bottom:env(safe-area-inset-bottom)}
+    input,select,textarea{font-size:16px!important;font-family:inherit}
+    #root{min-height:100vh}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    @keyframes slideUp{from{transform:translateY(100%)}to{transform:translateY(0)}}
+    @keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+  </style>
+  <!-- Supabase SDK -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <!-- React -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.development.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.development.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+</head>
+<body>
+<div id="root"></div>
+
+<script>
+  // Init Supabase
+  const SUPA_URL = 'https://wdsaxxgfpfoetsqozjuo.supabase.co';
+  const SUPA_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Indkc2F4eGdmcGZvZXRzcW96anVvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM2NjIyODcsImV4cCI6MjA4OTIzODI4N30.tRZfUMIkYx9-EuQ0IzXpRjkky3I364a21R_9xIuvndE';
+  window._supabase = supabase.createClient(SUPA_URL, SUPA_KEY);
+</script>
+
+<script type="text/babel">
+const { useState, useEffect, useMemo, useCallback, useRef } = React;
+const sb = window._supabase;
+
+// ─── STORAGE KEY for local fallback ───────────────────────────────────────────
+const LOCAL_KEY = 'mis-viajes-data-v1';
+function loadLocal() {
+  try { const r=localStorage.getItem(LOCAL_KEY); if(r) return JSON.parse(r); } catch(e){}
+  return [];
+}
+function saveLocal(trips) {
+  try { localStorage.setItem(LOCAL_KEY, JSON.stringify(trips)); } catch(e){}
+}
+
+// ─── AUTH SCREEN ──────────────────────────────────────────────────────────────
+function AuthScreen({ onLogin }) {
+  const [mode, setMode]       = useState('login');
+  const [email, setEmail]     = useState('');
+  const [pass, setPass]       = useState('');
+  const [name, setName]       = useState('');
+  const [error, setError]     = useState('');
+  const [loading, setLoading] = useState(false);
+  const [sent, setSent]       = useState(false);
+
+  const handleSubmit = async () => {
+    if (!email) { setError('Escribe tu email'); return; }
+    if (!pass)  { setError('Escribe tu contraseña'); return; }
+    setLoading(true); setError('');
+    try {
+      if (mode === 'register') {
+        if (!name.trim()) { setError('Escribe tu nombre'); setLoading(false); return; }
+        const { data, error: e } = await sb.auth.signUp({ email, password: pass, options: { data: { full_name: name.trim() } } });
+        if (e) throw e;
+        if (data.user && !data.session) { setSent(true); setLoading(false); return; }
+        onLogin(data.user);
+      } else {
+        const { data, error: e } = await sb.auth.signInWithPassword({ email, password: pass });
+        if (e) throw e;
+        onLogin(data.user);
+      }
+    } catch(e) {
+      const msgs = {
+        'Invalid login credentials': 'Email o contraseña incorrectos',
+        'User already registered': 'Este email ya está registrado. Inicia sesión.',
+        'Password should be at least 6 characters': 'La contraseña debe tener al menos 6 caracteres',
+        'Unable to validate email address: invalid format': 'El formato del email no es válido',
+      };
+      setError(msgs[e.message] || e.message);
+    }
+    setLoading(false);
+  };
+
+  if (sent) return (
+    <div style={{minHeight:'100vh',background:'#0F0E17',display:'flex',alignItems:'center',justifyContent:'center',padding:24}}>
+      <div style={{maxWidth:380,width:'100%',background:'#1C1B29',borderRadius:24,padding:'40px 28px',textAlign:'center',border:'1px solid #2D2C3E'}}>
+        <div style={{fontSize:56,marginBottom:16}}>📬</div>
+        <div style={{fontSize:22,fontWeight:800,color:'#FFFFFE',marginBottom:12}}>¡Revisa tu email!</div>
+        <div style={{fontSize:14,color:'#A7A9BE',lineHeight:1.6,marginBottom:24}}>Te hemos enviado un enlace de confirmación a <strong style={{color:'#FFFFFE'}}>{email}</strong>. Ábrelo para activar tu cuenta y luego inicia sesión.</div>
+        <button onClick={()=>{setSent(false);setMode('login');}} style={{width:'100%',padding:14,background:'#FF6B6B',border:'none',borderRadius:14,color:'#fff',fontWeight:700,fontSize:15,cursor:'pointer'}}>Volver al login</button>
+      </div>
+    </div>
+  );
+
+  return (
+    <div style={{minHeight:'100vh',background:'#0F0E17',display:'flex',alignItems:'center',justifyContent:'center',padding:24}}>
+      <div style={{maxWidth:380,width:'100%',background:'#1C1B29',borderRadius:28,padding:'40px 28px',border:'1px solid #2D2C3E'}}>
+        <div style={{textAlign:'center',marginBottom:28}}>
+          <div style={{width:72,height:72,borderRadius:20,background:'linear-gradient(135deg,#FF6B6B,#6366F1)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:36,margin:'0 auto 14px'}}>✈️</div>
+          <div style={{fontSize:26,fontWeight:800,color:'#FFFFFE',letterSpacing:-0.5}}>Mis Viajes</div>
+          <div style={{fontSize:13,color:'#A7A9BE',marginTop:6}}>{mode==='login'?'Inicia sesión para continuar':'Crea tu cuenta gratis'}</div>
+        </div>
+
+        {error&&<div style={{background:'#F8717118',border:'1px solid #F87171',borderRadius:12,padding:'11px 14px',color:'#F87171',fontSize:13,marginBottom:16,lineHeight:1.5}}>⚠️ {error}</div>}
+
+        {mode==='register'&&(
+          <>
+            <div style={{fontSize:11,fontWeight:600,color:'#A7A9BE',textTransform:'uppercase',letterSpacing:1,marginBottom:6}}>Tu nombre</div>
+            <input value={name} onChange={e=>setName(e.target.value)} placeholder="Ej: Erick" style={{width:'100%',background:'#13121F',border:'1px solid #2D2C3E',borderRadius:12,padding:'13px 14px',color:'#FFFFFE',fontSize:15,outline:'none',marginBottom:14,boxSizing:'border-box'}}/>
+          </>
+        )}
+        <div style={{fontSize:11,fontWeight:600,color:'#A7A9BE',textTransform:'uppercase',letterSpacing:1,marginBottom:6}}>Email</div>
+        <input type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="tu@email.com" style={{width:'100%',background:'#13121F',border:'1px solid #2D2C3E',borderRadius:12,padding:'13px 14px',color:'#FFFFFE',fontSize:15,outline:'none',marginBottom:14,boxSizing:'border-box'}}/>
+        <div style={{fontSize:11,fontWeight:600,color:'#A7A9BE',textTransform:'uppercase',letterSpacing:1,marginBottom:6}}>Contraseña</div>
+        <input type="password" value={pass} onChange={e=>setPass(e.target.value)} placeholder="Mínimo 6 caracteres" onKeyDown={e=>e.key==='Enter'&&handleSubmit()} style={{width:'100%',background:'#13121F',border:'1px solid #2D2C3E',borderRadius:12,padding:'13px 14px',color:'#FFFFFE',fontSize:15,outline:'none',marginBottom:20,boxSizing:'border-box'}}/>
+
+        <button onClick={handleSubmit} disabled={loading} style={{width:'100%',padding:15,background:'#FF6B6B',border:'none',borderRadius:14,color:'#fff',fontSize:16,fontWeight:700,cursor:'pointer',boxShadow:'0 6px 20px rgba(255,107,107,0.35)',opacity:loading?0.7:1}}>
+          {loading?'⏳ Cargando...':(mode==='login'?'Entrar':'Crear cuenta')}
+        </button>
+
+        <div style={{textAlign:'center',marginTop:20,fontSize:14,color:'#A7A9BE'}}>
+          {mode==='login'?'¿No tienes cuenta? ':'¿Ya tienes cuenta? '}
+          <button onClick={()=>{setMode(m=>m==='login'?'register':'login');setError('');}} style={{background:'none',border:'none',color:'#FF6B6B',cursor:'pointer',fontWeight:700,fontSize:14}}>
+            {mode==='login'?'Regístrate':'Inicia sesión'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// ─── PWA installer: injects all meta tags needed for iPhone home screen app ──
+function usePWA() {
+  useEffect(() => {
+    // Prevent double-injection
+    if (document.querySelector('meta[name="apple-mobile-web-app-capable"]')) return;
+
+    const head = document.head;
+
+    const metas = [
+      { name: "apple-mobile-web-app-capable",           content: "yes" },
+      { name: "apple-mobile-web-app-status-bar-style",  content: "black-translucent" },
+      { name: "apple-mobile-web-app-title",             content: "Mis Viajes" },
+      { name: "mobile-web-app-capable",                 content: "yes" },
+      { name: "theme-color",                            content: "#0F0E17" },
+      { name: "viewport",                               content: "width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" },
+    ];
+
+    metas.forEach(({ name, content }) => {
+      // update existing viewport meta if present, else create
+      let el = document.querySelector(`meta[name="${name}"]`);
+      if (!el) { el = document.createElement("meta"); el.name = name; head.appendChild(el); }
+      el.content = content;
+    });
+
+    // Title
+    document.title = "Mis Viajes ✈️";
+
+    // Inline SVG app icon (airplane + gradient) as apple-touch-icon
+    if (!document.querySelector('link[rel="apple-touch-icon"]')) {
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+        <rect width="512" height="512" rx="110" fill="#0F0E17"/>
+        <rect width="512" height="512" rx="110" fill="url(#g)"/>
+        <defs>
+          <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stop-color="#FF6B6B"/>
+            <stop offset="100%" stop-color="#6366F1"/>
+          </linearGradient>
+        </defs>
+        <text x="256" y="340" font-size="260" text-anchor="middle" font-family="Apple Color Emoji,sans-serif">✈️</text>
+      </svg>`;
+      const blob = new Blob([svg], { type: "image/svg+xml" });
+      const url  = URL.createObjectURL(blob);
+      const link = document.createElement("link");
+      link.rel  = "apple-touch-icon";
+      link.href = url;
+      head.appendChild(link);
+
+      // also regular favicon
+      const fav = document.createElement("link");
+      fav.rel  = "icon";
+      fav.href = url;
+      head.appendChild(fav);
+    }
+
+    // Global CSS: remove rubber-band scroll, safe-area insets, remove tap highlight
+    const style = document.createElement("style");
+    style.textContent = `
+      * { -webkit-tap-highlight-color: transparent; box-sizing: border-box; }
+      html, body {
+        overscroll-behavior: none;
+        background: #0F0E17;
+        margin: 0; padding: 0;
+        height: 100%;
+        font-family: -apple-system, 'DM Sans', sans-serif;
+      }
+      body { padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom); }
+      input, select, textarea { font-size: 16px !important; }
+    `;
+    head.appendChild(style);
+  }, []);
+}
+
+// ─── Install banner component ─────────────────────────────────────────────────
+function InstallBanner() {
+  const [show, setShow] = useState(false);
+
+  useEffect(() => {
+    // Only show on iOS Safari, not already installed
+    const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+    const isStandalone = window.navigator.standalone === true;
+    const dismissed = sessionStorage.getItem("pwa-banner-dismissed");
+    if (isIOS && !isStandalone && !dismissed) {
+      setTimeout(() => setShow(true), 1500);
+    }
+  }, []);
+
+  if (!show) return null;
+
+  return (
+    <div style={{
+      position:"fixed", bottom:0, left:0, right:0, zIndex:9999,
+      background:"linear-gradient(135deg,#1C1B29,#2D2C3E)",
+      borderTop:"1px solid #FF6B6B44",
+      borderRadius:"20px 20px 0 0",
+      padding:"20px 20px 36px",
+      boxShadow:"0 -8px 32px rgba(0,0,0,0.5)",
+      animation:"slideUp 0.4s ease",
+    }}>
+      <style>{`@keyframes slideUp{from{transform:translateY(100%)}to{transform:translateY(0)}}`}</style>
+      <button onClick={()=>{setShow(false);sessionStorage.setItem("pwa-banner-dismissed","1");}}
+        style={{position:"absolute",top:12,right:16,background:"none",border:"none",color:"#A7A9BE",fontSize:20,cursor:"pointer",padding:"4px 8px"}}>✕</button>
+
+      <div style={{display:"flex",gap:14,alignItems:"center",marginBottom:16}}>
+        <div style={{width:52,height:52,borderRadius:14,background:"linear-gradient(135deg,#FF6B6B,#6366F1)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:28,flexShrink:0}}>✈️</div>
+        <div>
+          <div style={{fontSize:16,fontWeight:800,color:"#FFFFFE"}}>Instalar Mis Viajes</div>
+          <div style={{fontSize:13,color:"#A7A9BE",marginTop:2}}>Añade la app a tu pantalla de inicio</div>
+        </div>
+      </div>
+
+      <div style={{display:"flex",flexDirection:"column",gap:10}}>
+        {[
+          ["1", `Toca el botón compartir`, "⬆️"],
+          ["2", `Desplázate y pulsa "Añadir a pantalla de inicio"`, "➕"],
+          ["3", "Pulsa Añadir — ¡listo!", "✅"],
+        ].map(([n,text,icon])=>(
+          <div key={n} style={{display:"flex",gap:12,alignItems:"center",background:"#13121F",borderRadius:12,padding:"10px 14px"}}>
+            <div style={{width:28,height:28,borderRadius:8,background:"#FF6B6B",display:"flex",alignItems:"center",justifyContent:"center",fontSize:13,fontWeight:800,color:"#fff",flexShrink:0}}>{n}</div>
+            <div style={{fontSize:13,color:"#FFFFFE",flex:1,lineHeight:1.4}}>{text}</div>
+            <div style={{fontSize:20}}>{icon}</div>
+          </div>
+        ))}
+      </div>
+
+      <div style={{marginTop:14,fontSize:11,color:"#A7A9BE",textAlign:"center",lineHeight:1.5}}>
+        Una vez instalada se abrirá como app nativa, sin barra de Safari 🚀
+      </div>
+    </div>
+  );
+}
+
+
+function loadJsPDF() {
+  return new Promise((resolve) => {
+    if (window.jspdf) { resolve(window.jspdf.jsPDF); return; }
+    const s = document.createElement("script");
+    s.src = "https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js";
+    s.onload = () => resolve(window.jspdf.jsPDF);
+    document.head.appendChild(s);
+  });
+}
+
+// ─── Sample data ──────────────────────────────────────────────────────────────
+const SAMPLE_TRIPS = [{
+  id: 1, title: "Tokyo Adventure", destination: "Japón",
+  startDate: "2026-04-10", endDate: "2026-04-20",
+  cover: "🗼", color: "#FF6B6B",
+  members: [
+    { id: "m1", name: "Ana",    avatar: "🙋‍♀️" },
+    { id: "m2", name: "Carlos", avatar: "🙋‍♂️" },
+    { id: "m3", name: "Sofía",  avatar: "👩" },
+  ],
+  expenses: [
+    { id: "e1", title: "Vuelos ida y vuelta", amount: 1200, currency: "EUR", category: "vuelo",     paidBy: "m1", splitWith: ["m1","m2","m3"], date: "2026-04-10", note: "Aerolínea JAL" },
+    { id: "e2", title: "Hotel Shinjuku (5 noches)", amount: 800, currency: "EUR", category: "hotel", paidBy: "m2", splitWith: ["m1","m2","m3"], date: "2026-04-10", note: "" },
+    { id: "e3", title: "Ramen Ichiran", amount: 45, currency: "EUR", category: "comida",  paidBy: "m3", splitWith: ["m1","m2","m3"], date: "2026-04-10", note: "Cena noche 1" },
+    { id: "e4", title: "JR Pass 7 días", amount: 360, currency: "EUR", category: "transporte", paidBy: "m1", splitWith: ["m1","m2","m3"], date: "2026-04-11", note: "" },
+  ],
+  accommodations: [
+    { id: "a1", name: "Hotel Shinjuku Granbell", address: "Shinjuku, Tokyo, Japan", checkIn: "2026-04-10", checkOut: "2026-04-15", note: "Reserva #4521", stars: 4 },
+    { id: "a2", name: "The Prince Park Tower Tokyo", address: "Shibakoen, Minato City, Tokyo", checkIn: "2026-04-15", checkOut: "2026-04-20", note: "Vista al Fuji", stars: 5 },
+  ],
+  days: [
+    { id: 1, date: "2026-04-10", activities: [
+      { id: 1, time: "09:00", title: "Llegada aeropuerto Narita", type: "vuelo",  note: "Terminal 2" },
+      { id: 2, time: "13:00", title: "Check-in Hotel Shinjuku",   type: "hotel",  note: "Reserva #4521" },
+      { id: 3, time: "19:00", title: "Cena en Ramen Ichiran",      type: "comida", note: "" },
+    ]},
+    { id: 2, date: "2026-04-11", activities: [
+      { id: 4, time: "08:00", title: "Templo Senso-ji, Asakusa", type: "turismo", note: "Llegar temprano" },
+      { id: 5, time: "12:00", title: "Almuerzo en Nakamise",      type: "comida",  note: "" },
+      { id: 6, time: "15:00", title: "Shibuya Crossing",          type: "turismo", note: "Foto obligatoria" },
+    ]},
+  ],
+}];
+
+// ─── Constants ────────────────────────────────────────────────────────────────
+const TYPE_CONFIG = {
+  vuelo:      { label:"Vuelo",      color:"#60A5FA", hex:[96,165,250],  emoji:"✈️" },
+  hotel:      { label:"Hotel",      color:"#A78BFA", hex:[167,139,250], emoji:"🏨" },
+  comida:     { label:"Comida",     color:"#FB923C", hex:[251,146,60],  emoji:"🍽️" },
+  turismo:    { label:"Turismo",    color:"#34D399", hex:[52,211,153],  emoji:"📍" },
+  transporte: { label:"Transporte", color:"#FBBF24", hex:[251,191,36],  emoji:"🚆" },
+  actividad:  { label:"Actividad",  color:"#F472B6", hex:[244,114,182], emoji:"🎯" },
+};
+const EXP_CATS = {
+  vuelo:      { label:"Vuelo",      color:"#60A5FA", emoji:"✈️" },
+  hotel:      { label:"Hotel",      color:"#A78BFA", emoji:"🏨" },
+  comida:     { label:"Comida",     color:"#FB923C", emoji:"🍽️" },
+  transporte: { label:"Transporte", color:"#FBBF24", emoji:"🚆" },
+  ocio:       { label:"Ocio",       color:"#34D399", emoji:"🎡" },
+  compras:    { label:"Compras",    color:"#F472B6", emoji:"🛍️" },
+  otro:       { label:"Otro",       color:"#A7A9BE", emoji:"💸" },
+};
+const CURRENCIES = ["EUR","USD","GBP","JPY","MXN","ARS","COP","CLP","BRL"];
+const EMOJIS = ["🌍","🗼","🏖️","🏔️","🗽","🏯","🌸","🎭","🎪","🚢","🎠","🌅"];
+const COLORS  = ["#6366F1","#EC4899","#F59E0B","#10B981","#3B82F6","#EF4444","#8B5CF6","#14B8A6"];
+const STARS   = [1,2,3,4,5];
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+const uid = () => Math.random().toString(36).slice(2);
+const fmt = (d) => { if(!d)return""; return new Date(d+"T12:00:00").toLocaleDateString("es-ES",{day:"numeric",month:"short",year:"numeric"}); };
+const fmtLong = (d) => { if(!d)return""; const s=new Date(d+"T12:00:00").toLocaleDateString("es-ES",{weekday:"long",day:"numeric",month:"long",year:"numeric"}); return s[0].toUpperCase()+s.slice(1); };
+const daysBetween = (s,e) => { if(!s||!e)return 0; return Math.max(1,Math.round((new Date(e)-new Date(s))/86400000)+1); };
+const genDays = (start,n) => Array.from({length:n},(_,i)=>{ const d=new Date(start+"T12:00:00"); d.setDate(d.getDate()+i); return{id:uid(),date:d.toISOString().slice(0,10),activities:[]}; });
+const hexRgb = (h) => [parseInt(h.slice(1,3),16),parseInt(h.slice(3,5),16),parseInt(h.slice(5,7),16)];
+const mapsUrl = (a) => `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(a)}`;
+const money = (n, cur="EUR") => {
+  const sym = {EUR:"€",USD:"$",GBP:"£",JPY:"¥",MXN:"$",ARS:"$",COP:"$",CLP:"$",BRL:"R$"}[cur]||cur+" ";
+  return sym + Number(n).toFixed(cur==="JPY"?0:2);
+};
+
+// ─── Tricount-style balance calculator ────────────────────────────────────────
+function calcBalances(members, expenses) {
+  const paid   = {};
+  const owes   = {};
+  members.forEach(m => { paid[m.id]=0; owes[m.id]=0; });
+
+  expenses.forEach(exp => {
+    if(paid[exp.paidBy]!==undefined) paid[exp.paidBy] += exp.amount;
+
+    if(exp.splitMode==="custom" && exp.customAmounts && Object.keys(exp.customAmounts).length>0){
+      // Use explicit per-person amounts
+      Object.entries(exp.customAmounts).forEach(([mid,amt])=>{
+        if(owes[mid]!==undefined) owes[mid] += parseFloat(amt)||0;
+      });
+    } else {
+      const share = exp.amount / (exp.splitWith?.length||1);
+      (exp.splitWith||[]).forEach(mid => { if(owes[mid]!==undefined) owes[mid] += share; });
+    }
+  });
+
+  const net = {};
+  members.forEach(m => { net[m.id] = paid[m.id] - owes[m.id]; });
+
+  const settlements = [];
+  const pos = members.filter(m=>net[m.id]>0.005).map(m=>({id:m.id,amt:net[m.id]})).sort((a,b)=>b.amt-a.amt);
+  const neg = members.filter(m=>net[m.id]<-0.005).map(m=>({id:m.id,amt:-net[m.id]})).sort((a,b)=>b.amt-a.amt);
+  let pi=0, ni=0;
+  while(pi<pos.length && ni<neg.length){
+    const settle=Math.min(pos[pi].amt,neg[ni].amt);
+    if(settle>0.005) settlements.push({from:neg[ni].id,to:pos[pi].id,amount:settle});
+    pos[pi].amt-=settle; neg[ni].amt-=settle;
+    if(pos[pi].amt<0.005)pi++;
+    if(neg[ni].amt<0.005)ni++;
+  }
+  return { paid, owes, net, settlements };
+}
+
+// ─── PDF Generator ────────────────────────────────────────────────────────────
+async function generateTripPDF(trip) {
+  const JsPDF = await loadJsPDF();
+  const doc = new JsPDF({ orientation:"portrait", unit:"mm", format:"a4" });
+  const W=210, H=297, M=18, CW=174;
+  const rgb = hexRgb(trip.color);
+  const accs = trip.accommodations||[];
+  const exps = trip.expenses||[];
+  const mems = trip.members||[];
+
+  // COVER
+  doc.setFillColor(...rgb); doc.rect(0,0,W,82,"F");
+  doc.setDrawColor(255,255,255); doc.setLineWidth(0.4);
+  doc.circle(W-28,18,36,"S"); doc.circle(W-28,18,22,"S");
+  doc.setTextColor(255,255,255);
+  doc.setFont("helvetica","bold"); doc.setFontSize(30); doc.text(trip.title,M,34);
+  doc.setFont("helvetica","normal"); doc.setFontSize(13); doc.text("Destino: "+trip.destination,M,48);
+  doc.setFontSize(10);
+  doc.text(fmt(trip.startDate)+"   ->   "+fmt(trip.endDate),M,61);
+  const totalActs=trip.days.reduce((a,d)=>a+d.activities.length,0);
+  const totalExp=exps.reduce((a,e)=>a+e.amount,0);
+  doc.text(daysBetween(trip.startDate,trip.endDate)+" dias  ·  "+totalActs+" actividades  ·  "+accs.length+" aloj.  ·  "+mems.length+" personas",M,72);
+
+  const stats=[{label:"DIAS",val:String(daysBetween(trip.startDate,trip.endDate))},{label:"GASTOS",val:money(totalExp,(exps[0]?.currency)||"EUR")},{label:"PERSONAS",val:String(mems.length)}];
+  const cw=(CW-8)/3;
+  stats.forEach((st,i)=>{ const cx=M+i*(cw+4);
+    doc.setFillColor(246,247,252); doc.roundedRect(cx,90,cw,24,3,3,"F");
+    doc.setTextColor(...rgb); doc.setFont("helvetica","bold"); doc.setFontSize(st.label==="GASTOS"?12:16);
+    doc.text(st.val,cx+cw/2,102,{align:"center"});
+    doc.setTextColor(140,140,160); doc.setFont("helvetica","normal"); doc.setFontSize(7.5);
+    doc.text(st.label,cx+cw/2,109,{align:"center"});
+  });
+
+  // Alojamientos
+  let cy=126;
+  if(accs.length>0){
+    doc.setTextColor(...rgb); doc.setFont("helvetica","bold"); doc.setFontSize(9);
+    doc.text("ALOJAMIENTOS",M,cy);
+    doc.setDrawColor(...rgb); doc.setLineWidth(0.5); doc.line(M,cy+2,M+48,cy+2); cy+=10;
+    accs.forEach((acc,i)=>{
+      const bh=acc.note?22:16;
+      doc.setFillColor(i%2===0?247:252,i%2===0?248:252,i%2===0?253:255);
+      doc.roundedRect(M,cy,CW,bh-2,2,2,"F");
+      doc.setFillColor(...rgb); doc.roundedRect(M,cy,3,bh-2,1,1,"F");
+      doc.setTextColor(28,28,48); doc.setFont("helvetica","bold"); doc.setFontSize(10);
+      doc.text(doc.splitTextToSize(acc.name,CW-30)[0],M+7,cy+8);
+      doc.setTextColor(100,100,130); doc.setFont("helvetica","normal"); doc.setFontSize(8);
+      doc.text(fmt(acc.checkIn)+" -> "+fmt(acc.checkOut),M+7,cy+14);
+      if(acc.note){ doc.setTextColor(130,130,155); doc.setFontSize(7.5); doc.text(doc.splitTextToSize(acc.note,CW-15)[0],M+7,cy+bh-5); }
+      cy+=bh+3;
+    });
+    cy+=4;
+  }
+
+  doc.setTextColor(185,185,205); doc.setFont("helvetica","normal"); doc.setFontSize(8);
+  doc.text("Generado el "+new Date().toLocaleDateString("es-ES"),W/2,H-10,{align:"center"});
+  doc.setDrawColor(...rgb); doc.setLineWidth(1.5); doc.line(0,H-4,W,H-4);
+
+  // EXPENSES PAGE
+  if(exps.length>0){
+    doc.addPage();
+    doc.setFillColor(...rgb); doc.rect(0,0,W,28,"F");
+    doc.setTextColor(255,255,255); doc.setFont("helvetica","bold"); doc.setFontSize(14);
+    doc.text("GASTOS DEL VIAJE",M,18);
+    doc.setFont("helvetica","normal"); doc.setFontSize(9);
+    doc.text(exps.length+" gastos  ·  Total: "+money(totalExp,(exps[0]?.currency)||"EUR"),W-M,18,{align:"right"});
+
+    // balances
+    if(mems.length>0){
+      const bal=calcBalances(mems,exps);
+      let by=40;
+      doc.setTextColor(...rgb); doc.setFont("helvetica","bold"); doc.setFontSize(9);
+      doc.text("BALANCE POR PERSONA",M,by);
+      doc.setDrawColor(...rgb); doc.setLineWidth(0.5); doc.line(M,by+2,M+60,by+2); by+=10;
+      mems.forEach((m,i)=>{
+        const n=bal.net[m.id]||0;
+        doc.setFillColor(i%2===0?247:252,i%2===0?248:252,i%2===0?253:255);
+        doc.roundedRect(M,by,CW,13,2,2,"F");
+        doc.setTextColor(28,28,48); doc.setFont("helvetica","bold"); doc.setFontSize(10);
+        doc.text(m.name,M+6,by+9);
+        const col=n>=0?[34,197,94]:[239,68,68];
+        doc.setTextColor(...col); doc.setFont("helvetica","bold"); doc.setFontSize(10);
+        doc.text((n>=0?"+":"")+money(Math.abs(n),(exps[0]?.currency)||"EUR"),W-M,by+9,{align:"right"});
+        by+=16;
+      });
+
+      // settlements
+      if(bal.settlements.length>0){
+        by+=4;
+        doc.setTextColor(...rgb); doc.setFont("helvetica","bold"); doc.setFontSize(9);
+        doc.text("LIQUIDACIONES SUGERIDAS",M,by);
+        doc.setDrawColor(...rgb); doc.setLineWidth(0.5); doc.line(M,by+2,M+70,by+2); by+=10;
+        bal.settlements.forEach((s,i)=>{
+          const fm=mems.find(m=>m.id===s.from);
+          const tm=mems.find(m=>m.id===s.to);
+          if(!fm||!tm)return;
+          doc.setFillColor(i%2===0?247:252,i%2===0?248:252,i%2===0?253:255);
+          doc.roundedRect(M,by,CW,13,2,2,"F");
+          doc.setTextColor(28,28,48); doc.setFont("helvetica","normal"); doc.setFontSize(10);
+          doc.text(fm.name+" → "+tm.name,M+6,by+9);
+          doc.setTextColor(34,197,94); doc.setFont("helvetica","bold");
+          doc.text(money(s.amount,(exps[0]?.currency)||"EUR"),W-M,by+9,{align:"right"});
+          by+=16;
+        });
+        by+=4;
+      }
+
+      // expense list
+      by+=4;
+      doc.setTextColor(...rgb); doc.setFont("helvetica","bold"); doc.setFontSize(9);
+      doc.text("LISTA DE GASTOS",M,by);
+      doc.setDrawColor(...rgb); doc.setLineWidth(0.5); doc.line(M,by+2,M+48,by+2); by+=10;
+      exps.forEach((exp,i)=>{
+        const bh=exp.note?22:16;
+        if(by+bh>H-18){ doc.addPage(); by=18; }
+        const ec=EXP_CATS[exp.category]||EXP_CATS.otro;
+        doc.setFillColor(i%2===0?247:252,i%2===0?248:252,i%2===0?253:255);
+        doc.roundedRect(M,by,CW,bh-2,2,2,"F");
+        doc.setFillColor(...hexRgb(ec.color)); doc.roundedRect(M,by,3,bh-2,1,1,"F");
+        doc.setTextColor(28,28,48); doc.setFont("helvetica","bold"); doc.setFontSize(10);
+        doc.text(doc.splitTextToSize(exp.title,CW-55)[0],M+7,by+8);
+        doc.setTextColor(...hexRgb(ec.color)); doc.setFont("helvetica","bold"); doc.setFontSize(10);
+        doc.text(money(exp.amount,exp.currency),W-M,by+8,{align:"right"});
+        doc.setTextColor(100,100,130); doc.setFont("helvetica","normal"); doc.setFontSize(7.5);
+        const payer=mems.find(m=>m.id===exp.paidBy);
+        doc.text("Pagó: "+(payer?.name||"?")+"  ·  "+fmt(exp.date),M+7,by+14);
+        if(exp.note){ doc.setTextColor(150,150,170); doc.setFontSize(7); doc.text(exp.note,M+7,by+bh-4); }
+        by+=bh+3;
+      });
+    }
+
+    doc.setTextColor(185,185,205); doc.setFont("helvetica","normal"); doc.setFontSize(8);
+    doc.text(trip.title+"  ·  Gastos",W/2,H-10,{align:"center"});
+    doc.setDrawColor(...rgb); doc.setLineWidth(0.8); doc.line(M,H-6,W-M,H-6);
+  }
+
+  // DAY PAGES
+  trip.days.forEach((day,dayIdx)=>{
+    doc.addPage();
+    doc.setFillColor(...rgb); doc.rect(0,0,W,28,"F");
+    doc.setTextColor(255,255,255); doc.setFont("helvetica","bold"); doc.setFontSize(13);
+    doc.text("DIA "+(dayIdx+1),M,12);
+    doc.setFont("helvetica","normal"); doc.setFontSize(10); doc.text(fmtLong(day.date),M,21);
+    doc.setFontSize(9); doc.text(day.activities.length+" actividad"+(day.activities.length!==1?"es":""),W-M,16,{align:"right"});
+    const activeAcc=accs.find(a=>day.date>=a.checkIn&&day.date<a.checkOut);
+    let ay=40;
+    if(activeAcc){
+      doc.setFillColor(220,210,255); doc.roundedRect(M,ay,CW,14,2,2,"F");
+      doc.setFillColor(...hexRgb("#A78BFA")); doc.roundedRect(M,ay,3,14,1,1,"F");
+      doc.setTextColor(80,40,160); doc.setFont("helvetica","bold"); doc.setFontSize(8);
+      doc.text("Alojamiento: "+activeAcc.name,M+7,ay+9); ay+=20;
+    }
+    if(day.activities.length===0){ doc.setTextColor(180,180,200); doc.setFont("helvetica","italic"); doc.setFontSize(11); doc.text("Sin actividades.",M,ay); }
+    day.activities.forEach((act,idx)=>{
+      const tc=TYPE_CONFIG[act.type]||TYPE_CONFIG.actividad;
+      const images=(act.images||[]).filter(img=>img&&(img.startsWith("data:")||img.startsWith("http")));
+      const hasPhotos=images.length>0;
+      const bh=act.note?23:17;
+
+      // Check page overflow for activity row
+      if(ay+bh>H-18){ doc.addPage(); doc.setFillColor(...rgb); doc.rect(0,0,W,16,"F"); doc.setTextColor(255,255,255); doc.setFont("helvetica","bold"); doc.setFontSize(9); doc.text("DIA "+(dayIdx+1)+" (cont.)",M,11); ay=26; }
+
+      // Activity row
+      doc.setFillColor(idx%2===0?247:252,idx%2===0?248:252,idx%2===0?253:255);
+      doc.roundedRect(M,ay,CW,bh-2,2,2,"F");
+      doc.setFillColor(...tc.hex); doc.roundedRect(M,ay,3,bh-2,1,1,"F");
+      doc.setTextColor(...tc.hex); doc.setFont("helvetica","bold"); doc.setFontSize(9); doc.text(act.time,M+7,ay+8);
+      doc.setFillColor(...tc.hex); doc.roundedRect(M+23,ay+3,20,6,1.5,1.5,"F");
+      doc.setTextColor(255,255,255); doc.setFont("helvetica","bold"); doc.setFontSize(6.5); doc.text(tc.label.toUpperCase(),M+33,ay+7.5,{align:"center"});
+      doc.setTextColor(28,28,48); doc.setFont("helvetica","bold"); doc.setFontSize(10.5); doc.text(doc.splitTextToSize(act.title,CW-48)[0],M+47,ay+8);
+      if(act.note){ doc.setTextColor(130,130,155); doc.setFont("helvetica","normal"); doc.setFontSize(8.5); doc.text(doc.splitTextToSize(act.note,CW-50)[0],M+7,ay+16); }
+      // Photo count badge — no emoji (renders as garbage in jsPDF)
+      if(hasPhotos){
+        doc.setTextColor(...tc.hex); doc.setFontSize(7.5); doc.setFont("helvetica","bold");
+        doc.text(images.length+" foto"+(images.length!==1?"s":""),W-M,ay+8,{align:"right"});
+      }
+      ay+=bh+3;
+
+      // Photos grid — 2 per row, large size
+      const b64imgs=images.filter(img=>img.startsWith("data:"));
+      if(b64imgs.length>0){
+        const perRow=2;
+        const imgW=(CW-6)/perRow;   // ~84mm each — full width split in 2
+        const imgH=imgW*0.65;        // 4:3 aspect ratio (~55mm tall)
+        const gap=6;
+        const rows=Math.ceil(b64imgs.length/perRow);
+        const totalImgH=rows*(imgH+gap)+12;
+
+        if(ay+totalImgH>H-18){
+          doc.addPage();
+          doc.setFillColor(...rgb); doc.rect(0,0,W,16,"F");
+          doc.setTextColor(255,255,255); doc.setFont("helvetica","bold"); doc.setFontSize(9);
+          doc.text("DIA "+(dayIdx+1)+" - fotos de "+act.title,M,11);
+          ay=24;
+        }
+
+        doc.setTextColor(130,130,155); doc.setFont("helvetica","italic"); doc.setFontSize(7.5);
+        doc.text("Fotos: "+act.title, M, ay+4); ay+=8;
+
+        b64imgs.forEach((img,i)=>{
+          const col=i%perRow;
+          const row=Math.floor(i/perRow);
+          const x=M+col*(imgW+gap);
+          const y=ay+row*(imgH+gap);
+          try {
+            const fmt=img.startsWith("data:image/png")?"PNG":img.startsWith("data:image/webp")?"WEBP":"JPEG";
+            doc.addImage(img,fmt,x,y,imgW,imgH,undefined,"FAST");
+            doc.setDrawColor(...tc.hex); doc.setLineWidth(0.4);
+            doc.roundedRect(x,y,imgW,imgH,3,3,"S");
+          } catch(e){
+            doc.setFillColor(230,231,240); doc.roundedRect(x,y,imgW,imgH,3,3,"F");
+            doc.setTextColor(160,160,180); doc.setFontSize(8); doc.text("foto",x+imgW/2,y+imgH/2,{align:"center"});
+          }
+        });
+        ay+=rows*(imgH+gap)+6;
+      }
+    });
+    doc.setTextColor(185,185,205); doc.setFont("helvetica","normal"); doc.setFontSize(8);
+    doc.text(trip.title+"  ·  Dia "+(dayIdx+1)+" de "+trip.days.length,W/2,H-10,{align:"center"});
+    doc.setDrawColor(...rgb); doc.setLineWidth(0.8); doc.line(M,H-6,W-M,H-6);
+  });
+
+  doc.save(trip.title.replace(/\s+/g,"-").toLowerCase()+"-itinerario.pdf");
+}
+
+// ─── EXPENSES DASHBOARD PDF ───────────────────────────────────────────────────
+async function generateExpensesPDF(trip) {
+  const JsPDF = await loadJsPDF();
+  const doc   = new JsPDF({ orientation:"portrait", unit:"mm", format:"a4" });
+  const W=210, H=297, M=16, CW=178;
+  const rgb   = hexRgb(trip.color);
+  const exps  = trip.expenses||[];
+  const mems  = trip.members||[];
+  const cur   = exps[0]?.currency||"EUR";
+  const total = exps.reduce((a,e)=>a+e.amount,0);
+  const bal   = calcBalances(mems, exps);
+
+  // helper: section header
+  const sectionHeader = (label, y) => {
+    doc.setFillColor(...rgb); doc.roundedRect(M,y,CW,8,2,2,"F");
+    doc.setTextColor(255,255,255); doc.setFont("helvetica","bold"); doc.setFontSize(8);
+    doc.text(label.toUpperCase(), M+6, y+5.5);
+    return y+13;
+  };
+
+  // helper: horizontal bar chart (value 0-max, width available)
+  const barChart = (value, max, barW, color, y, x) => {
+    const fill = max>0 ? Math.max(2, (value/max)*barW) : 0;
+    doc.setFillColor(230,231,240); doc.roundedRect(x,y,barW,4,2,2,"F");
+    doc.setFillColor(...hexRgb(color)); doc.roundedRect(x,y,fill,4,2,2,"F");
+  };
+
+  // ── PAGE 1: COVER DASHBOARD ────────────────────────────────────────────────
+  // Full header strip
+  doc.setFillColor(...rgb); doc.rect(0,0,W,52,"F");
+  // Decorative circles
+  doc.setDrawColor(255,255,255); doc.setLineWidth(0.3);
+  doc.circle(W-22,14,28,"S"); doc.circle(W-22,14,18,"S");
+
+  doc.setTextColor(255,255,255);
+  doc.setFont("helvetica","bold"); doc.setFontSize(9);
+  doc.text("INFORME DE GASTOS", M, 14);
+  doc.setFontSize(22); doc.text(trip.title, M, 28);
+  doc.setFont("helvetica","normal"); doc.setFontSize(9);
+  doc.text(trip.destination+"   ·   "+fmt(trip.startDate)+" → "+fmt(trip.endDate), M, 38);
+  doc.text("Generado el "+new Date().toLocaleDateString("es-ES"), M, 47);
+
+  // ── KPI CARDS row ──
+  const kpis = [
+    { label:"Total gastado",  value:money(total,cur),         color:trip.color },
+    { label:"Gastos",         value:String(exps.length),      color:"#60A5FA"  },
+    { label:"Personas",       value:String(mems.length),      color:"#A78BFA"  },
+    { label:"Media/persona",  value:mems.length?money(total/mems.length,cur):"—", color:"#34D399" },
+  ];
+  const kw=(CW-9)/4;
+  kpis.forEach((k,i)=>{
+    const kx=M+i*(kw+3);
+    doc.setFillColor(245,246,252); doc.roundedRect(kx,58,kw,22,3,3,"F");
+    doc.setFillColor(...hexRgb(k.color)); doc.roundedRect(kx,58,kw,3,1.5,1.5,"F");
+    doc.setTextColor(...hexRgb(k.color)); doc.setFont("helvetica","bold"); doc.setFontSize(i===0||i===3?10:14);
+    doc.text(k.value, kx+kw/2, 70, {align:"center"});
+    doc.setTextColor(120,120,145); doc.setFont("helvetica","normal"); doc.setFontSize(6.5);
+    doc.text(k.label.toUpperCase(), kx+kw/2, 76, {align:"center"});
+  });
+
+  // ── SECTION 1: GASTO POR CATEGORÍA ────────────────────────────────────────
+  let y = sectionHeader("Gasto por categoría", 88);
+  const byCat={};
+  exps.forEach(e=>{ byCat[e.category]=(byCat[e.category]||0)+e.amount; });
+  const catEntries=Object.entries(byCat).sort((a,b)=>b[1]-a[1]);
+  const maxCat=catEntries[0]?.[1]||1;
+
+  catEntries.forEach(([cat,amt],i)=>{
+    const ec=EXP_CATS[cat]||EXP_CATS.otro;
+    const pct=total>0?Math.round(amt/total*100):0;
+    const row = i%2===0;
+    if(row){ doc.setFillColor(248,249,253); doc.roundedRect(M,y-3,CW,12,1.5,1.5,"F"); }
+    // emoji label
+    doc.setTextColor(28,28,48); doc.setFont("helvetica","bold"); doc.setFontSize(9);
+    doc.text(ec.label, M+5, y+4);
+    // bar
+    barChart(amt, maxCat, 70, ec.color, y+1, M+35);
+    // pct
+    doc.setTextColor(110,110,140); doc.setFont("helvetica","normal"); doc.setFontSize(8);
+    doc.text(pct+"%", M+108, y+5);
+    // amount
+    doc.setTextColor(...hexRgb(ec.color)); doc.setFont("helvetica","bold"); doc.setFontSize(9);
+    doc.text(money(amt,cur), W-M, y+5, {align:"right"});
+    y+=12;
+  });
+  y+=4;
+
+  // ── SECTION 2: GASTO POR PERSONA ──────────────────────────────────────────
+  y = sectionHeader("Gasto por persona", y);
+  // Use calcBalances for correct per-person amounts (respects custom splits)
+  const maxMem=Math.max(...mems.map(m=>bal.owes[m.id]||0),1);
+
+  mems.forEach((m,i)=>{
+    const amt=bal.owes[m.id]||0;
+    const pct=total>0?Math.round(amt/total*100):0;
+    const paidAmt=bal.paid[m.id]||0;
+    if(i%2===0){ doc.setFillColor(248,249,253); doc.roundedRect(M,y-3,CW,12,1.5,1.5,"F"); }
+    doc.setTextColor(28,28,48); doc.setFont("helvetica","bold"); doc.setFontSize(9);
+    doc.text(m.name, M+5, y+4);
+    barChart(amt, maxMem, 62, trip.color, y+1, M+38);
+    doc.setTextColor(110,110,140); doc.setFont("helvetica","normal"); doc.setFontSize(7.5);
+    doc.text("Pagado: "+money(paidAmt,cur)+"  ·  Gastado: "+money(amt,cur), M+103, y+5);
+    doc.setTextColor(...rgb); doc.setFont("helvetica","bold"); doc.setFontSize(9);
+    const net=bal.net[m.id]||0;
+    doc.setTextColor(...hexRgb(Math.abs(net)<0.01?"#A7A9BE":net>0?"#4ADE80":"#F87171"));
+    doc.text((net>=0?"+":"")+money(net,cur), W-M, y+5, {align:"right"});
+    y+=12;
+  });
+  y+=4;
+
+  // ── SECTION 3: BALANCE & LIQUIDACIONES ────────────────────────────────────
+  if(y+60 > H-20){ doc.addPage(); y=20; }
+  y = sectionHeader("Balance individual", y);
+
+  const colW=(CW-4)/mems.length;
+  mems.forEach((m,i)=>{
+    const n=bal.net[m.id]||0;
+    const isPos=n>=0.01, isNeg=n<=-0.01;
+    const cx=M+i*(colW+4/(mems.length));
+    const cardH=34;
+    // card bg
+    doc.setFillColor(isPos?232:isNeg?254:245, isPos?249:isNeg?232:246, isPos?240:isNeg?232:252);
+    doc.roundedRect(cx,y,colW,cardH,3,3,"F");
+    doc.setFillColor(...hexRgb(isPos?"#4ADE80":isNeg?"#F87171":"#A7A9BE"));
+    doc.roundedRect(cx,y,colW,3,1.5,1.5,"F");
+    // name
+    doc.setTextColor(28,28,48); doc.setFont("helvetica","bold"); doc.setFontSize(8.5);
+    doc.text(m.name, cx+colW/2, y+11, {align:"center"});
+    // net amount
+    const col=isPos?"#4ADE80":isNeg?"#F87171":"#A7A9BE";
+    doc.setTextColor(...hexRgb(col)); doc.setFont("helvetica","bold"); doc.setFontSize(9);
+    doc.text((n>=0?"+":"")+money(Math.abs(n),cur), cx+colW/2, y+20, {align:"center"});
+    // status label
+    doc.setFontSize(6.5); doc.setFont("helvetica","normal");
+    doc.text(isPos?"Le deben":isNeg?"Debe":"OK", cx+colW/2, y+28, {align:"center"});
+  });
+  y+=38;
+
+  // Liquidaciones
+  if(bal.settlements.length>0){
+    y+=2;
+    doc.setTextColor(...rgb); doc.setFont("helvetica","bold"); doc.setFontSize(8);
+    doc.text("LIQUIDACIONES SUGERIDAS", M, y); y+=6;
+    doc.setDrawColor(...rgb); doc.setLineWidth(0.4); doc.line(M,y,M+70,y); y+=6;
+    bal.settlements.forEach((s,i)=>{
+      const fm=mems.find(m=>m.id===s.from), tm=mems.find(m=>m.id===s.to);
+      if(!fm||!tm)return;
+      if(i%2===0){ doc.setFillColor(248,249,253); doc.roundedRect(M,y-2,CW,11,1.5,1.5,"F"); }
+      doc.setTextColor(28,28,48); doc.setFont("helvetica","normal"); doc.setFontSize(9.5);
+      doc.text(fm.name, M+5, y+5);
+      doc.setTextColor(160,160,185); doc.setFont("helvetica","normal"); doc.setFontSize(9);
+      doc.text("→", M+5+doc.getTextWidth(fm.name)+3, y+5);
+      doc.setTextColor(28,28,48); doc.setFont("helvetica","bold"); doc.setFontSize(9.5);
+      doc.text(tm.name, M+5+doc.getTextWidth(fm.name)+10, y+5);
+      doc.setTextColor(52,199,89); doc.setFont("helvetica","bold"); doc.setFontSize(10);
+      doc.text(money(s.amount,cur), W-M, y+5, {align:"right"});
+      y+=12;
+    });
+  } else {
+    doc.setFillColor(220,252,231); doc.roundedRect(M,y,CW,14,3,3,"F");
+    doc.setTextColor(22,101,52); doc.setFont("helvetica","bold"); doc.setFontSize(9);
+    doc.text("Todo equilibrado — no hay transferencias necesarias", M+CW/2, y+9, {align:"center"});
+    y+=18;
+  }
+  y+=6;
+
+  // ── PAGE 2: ANÁLISIS DETALLADO ─────────────────────────────────────────────
+  doc.addPage();
+  doc.setFillColor(...rgb); doc.rect(0,0,W,20,"F");
+  doc.setTextColor(255,255,255); doc.setFont("helvetica","bold"); doc.setFontSize(11);
+  doc.text("ANÁLISIS DETALLADO DE GASTOS", M, 13);
+  doc.setFont("helvetica","normal"); doc.setFontSize(8);
+  doc.text(trip.title, W-M, 13, {align:"right"});
+  y=28;
+
+  // ── SECCIÓN: GASTO POR PERSONA Y CATEGORÍA (tabla cruzada) ────────────────
+  y = sectionHeader("Desglose persona × categoría", y);
+
+  if(mems.length>0 && catEntries.length>0){
+    // matrix: rows = members, cols = categories
+    const colCount=Math.min(catEntries.length,6);
+    const cats6=catEntries.slice(0,colCount).map(([k])=>k);
+    const cellW=(CW-30)/colCount;
+
+    // header row
+    doc.setFillColor(235,236,245); doc.roundedRect(M,y,CW,8,1,1,"F");
+    doc.setTextColor(80,80,120); doc.setFont("helvetica","bold"); doc.setFontSize(6.5);
+    doc.text("PERSONA", M+2, y+5.5);
+    cats6.forEach((cat,ci)=>{
+      const ec=EXP_CATS[cat]||EXP_CATS.otro;
+      doc.setTextColor(...hexRgb(ec.color));
+      doc.text(ec.label.toUpperCase(), M+30+ci*cellW+cellW/2, y+5.5, {align:"center"});
+    });
+    doc.setTextColor(80,80,120); doc.text("TOTAL", W-M, y+5.5, {align:"right"});
+    y+=10;
+
+    // data rows
+    mems.forEach((m,mi)=>{
+      const rowTotal=bal.owes[m.id]||0;
+      if(mi%2===0){ doc.setFillColor(250,251,255); doc.roundedRect(M,y,CW,10,1,1,"F"); }
+      doc.setTextColor(28,28,48); doc.setFont("helvetica","bold"); doc.setFontSize(8);
+      doc.text(m.name, M+2, y+6.5);
+      cats6.forEach((cat,ci)=>{
+        // amount this member owes in this category
+        let amt=0;
+        exps.filter(e=>e.category===cat&&(e.splitWith||[]).includes(m.id)).forEach(e=>{ amt+=e.amount/(e.splitWith?.length||1); });
+        doc.setTextColor(amt>0?28:180, amt>0?28:180, amt>0?48:200);
+        doc.setFont("helvetica", amt>0?"bold":"normal"); doc.setFontSize(8);
+        doc.text(amt>0?money(amt,cur):"—", M+30+ci*cellW+cellW/2, y+6.5, {align:"center"});
+      });
+      doc.setTextColor(...rgb); doc.setFont("helvetica","bold"); doc.setFontSize(8.5);
+      doc.text(money(rowTotal,cur), W-M, y+6.5, {align:"right"});
+      y+=11;
+    });
+
+    // totals row
+    doc.setFillColor(...rgb,20);
+    doc.setFillColor(rgb[0],rgb[1],rgb[2]); doc.setGState && doc.setGState(doc.GState({opacity:0.08}));
+    doc.roundedRect(M,y,CW,10,1,1,"F");
+    doc.setGState && doc.setGState(doc.GState({opacity:1}));
+    doc.setFillColor(230,232,245); doc.roundedRect(M,y,CW,10,1,1,"F");
+    doc.setTextColor(80,80,120); doc.setFont("helvetica","bold"); doc.setFontSize(7.5);
+    doc.text("TOTAL", M+2, y+6.5);
+    cats6.forEach((cat,ci)=>{
+      const catTotal=byCat[cat]||0;
+      doc.setTextColor(...hexRgb((EXP_CATS[cat]||EXP_CATS.otro).color));
+      doc.text(money(catTotal,cur), M+30+ci*cellW+cellW/2, y+6.5, {align:"center"});
+    });
+    doc.setTextColor(...rgb); doc.setFont("helvetica","bold"); doc.setFontSize(9);
+    doc.text(money(total,cur), W-M, y+6.5, {align:"right"});
+    y+=15;
+  }
+
+  // ── SECCIÓN: EVOLUCIÓN CRONOLÓGICA (gastos por fecha) ─────────────────────
+  y = sectionHeader("Gastos por fecha", y);
+  const byDate={};
+  exps.forEach(e=>{ byDate[e.date]=(byDate[e.date]||0)+e.amount; });
+  const dateEntries=Object.entries(byDate).sort(([a],[b])=>a.localeCompare(b));
+  const maxDay=Math.max(...dateEntries.map(([,v])=>v),1);
+  const barAreaW=CW-60;
+
+  dateEntries.forEach(([date,amt],i)=>{
+    if(y>H-20){ doc.addPage(); y=18; }
+    if(i%2===0){ doc.setFillColor(248,249,253); doc.roundedRect(M,y-2,CW,10,1.5,1.5,"F"); }
+    doc.setTextColor(28,28,48); doc.setFont("helvetica","normal"); doc.setFontSize(8);
+    doc.text(fmt(date), M+2, y+4.5);
+    barChart(amt, maxDay, barAreaW, trip.color, y+1, M+40);
+    doc.setTextColor(...rgb); doc.setFont("helvetica","bold"); doc.setFontSize(8.5);
+    doc.text(money(amt,cur), W-M, y+4.5, {align:"right"});
+    y+=11;
+  });
+  y+=6;
+
+  // ── SECCIÓN: LISTADO COMPLETO DE GASTOS ───────────────────────────────────
+  if(y>H-40){ doc.addPage(); y=18; }
+  y = sectionHeader("Listado completo de gastos", y);
+
+  // table header
+  doc.setFillColor(235,236,245); doc.roundedRect(M,y,CW,8,1,1,"F");
+  doc.setTextColor(80,80,120); doc.setFont("helvetica","bold"); doc.setFontSize(6.5);
+  ["DESCRIPCIÓN","CATEGORÍA","PAGÓ","DIVIDE","FECHA","IMPORTE"].forEach((h,i)=>{
+    const xs=[M+2,M+52,M+83,M+108,M+125,W-M];
+    const aligns=["left","left","left","left","left","right"];
+    doc.text(h, xs[i], y+5.5, {align:aligns[i]});
+  });
+  y+=10;
+
+  exps.forEach((exp,i)=>{
+    if(y>H-18){ doc.addPage(); y=18; }
+    const ec=EXP_CATS[exp.category]||EXP_CATS.otro;
+    const payer=mems.find(m=>m.id===exp.paidBy);
+    if(i%2===0){ doc.setFillColor(250,251,255); doc.roundedRect(M,y,CW,9,1,1,"F"); }
+    // left accent
+    doc.setFillColor(...hexRgb(ec.color)); doc.roundedRect(M,y,2,9,1,1,"F");
+    doc.setTextColor(28,28,48); doc.setFont("helvetica","bold"); doc.setFontSize(8);
+    doc.text(doc.splitTextToSize(exp.title,46)[0], M+4, y+6);
+    doc.setTextColor(...hexRgb(ec.color)); doc.setFont("helvetica","normal"); doc.setFontSize(7.5);
+    doc.text(ec.label, M+52, y+6);
+    doc.setTextColor(80,80,120); doc.setFont("helvetica","normal"); doc.setFontSize(7.5);
+    doc.text(payer?.name||"?", M+83, y+6);
+    doc.text(String(exp.splitWith?.length||0)+" pers.", M+108, y+6);
+    doc.text(fmt(exp.date), M+125, y+6);
+    doc.setTextColor(...hexRgb(ec.color)); doc.setFont("helvetica","bold"); doc.setFontSize(8.5);
+    doc.text(money(exp.amount,cur), W-M, y+6, {align:"right"});
+    y+=10;
+  });
+
+  // Total row
+  doc.setFillColor(230,232,245); doc.roundedRect(M,y,CW,11,1.5,1.5,"F");
+  doc.setTextColor(80,80,120); doc.setFont("helvetica","bold"); doc.setFontSize(8.5);
+  doc.text("TOTAL", M+4, y+7);
+  doc.setTextColor(...rgb); doc.setFont("helvetica","bold"); doc.setFontSize(10);
+  doc.text(money(total,cur), W-M, y+7, {align:"right"});
+  y+=16;
+
+  // ── FOOTER on all pages ───────────────────────────────────────────────────
+  const pageCount=doc.getNumberOfPages();
+  for(let p=1;p<=pageCount;p++){
+    doc.setPage(p);
+    doc.setTextColor(185,185,205); doc.setFont("helvetica","normal"); doc.setFontSize(7.5);
+    doc.text(trip.title+"  ·  Informe de Gastos  ·  Pág "+p+" de "+pageCount, W/2, H-8, {align:"center"});
+    doc.setDrawColor(...rgb); doc.setLineWidth(0.6); doc.line(M,H-5,W-M,H-5);
+    doc.setFillColor(...rgb); doc.circle(M-3,H-5,1.2,"F"); doc.circle(W-M+3,H-5,1.2,"F");
+  }
+
+  doc.save(trip.title.replace(/\s+/g,"-").toLowerCase()+"-gastos.pdf");
+}
+
+// ─── localStorage persistence helpers ────────────────────────────────────────
+const STORAGE_KEY = "mis-viajes-data-v1";
+
+function loadTrips() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+  } catch(e) { console.warn("Error loading trips:", e); }
+  return SAMPLE_TRIPS;
+}
+
+function saveTrips(trips) {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(trips)); }
+  catch(e) { console.warn("Error saving trips:", e); }
+}
+
+// ─── MAIN COMPONENT ───────────────────────────────────────────────────────────
+function AppInner({ cloudTrips=[], onSaveTrip, onAddTrip, onDeleteTrip, currentUser, onLogout, syncing, onGenerateInvite, showJoin, setShowJoin, joinCode, setJoinCode, joinError, joinLoading, joinSuccess, onJoin }) {
+  const trips = cloudTrips;
+  const setTrips = (u) => { const n = typeof u === "function" ? u(cloudTrips) : u; n.forEach(t => { const o = cloudTrips.find(x => x.id === t.id); if (JSON.stringify(o) !== JSON.stringify(t)) onSaveTrip(t); }); };
+  const [view,         setView]         = useState("home");
+  const [activeTrip,   setActiveTrip]   = useState(null);
+  const [activeDay,    setActiveDay]    = useState(null);
+  const [activeAct,    setActiveAct]    = useState(null);
+  const [editingAct,   setEditingAct]   = useState(null);
+  const [editingAcc,   setEditingAcc]   = useState(null);
+  const [editingExp,   setEditingExp]   = useState(null);
+  const [activeDayIdx, setActiveDayIdx] = useState(0);
+  const [activeTab,    setActiveTab]    = useState("dias");
+  const [expSubTab,    setExpSubTab]    = useState("lista"); // "lista" | "balance"
+  const [selectedMember, setSelectedMember] = useState(null);
+  const [pdfLoading,   setPdfLoading]   = useState(null);
+  const [expPdfLoad,   setExpPdfLoad]   = useState(false);
+  const [newMemberName,setNewMemberName]= useState("");
+  const [newMemberAvatar,setNewMemberAvatar]=useState("👨🏻");
+  const [showAddMember,setShowAddMember]=useState(false);
+  const [lightbox,     setLightbox]     = useState(null);
+  const [deleteModal,  setDeleteModal]  = useState(null);
+  const [deleteConfirm,setDeleteConfirm]= useState(false);
+
+  const [tripForm, setTripForm] = useState({title:"",destination:"",startDate:"",endDate:"",cover:"🌍",color:"#6366F1"});
+  const [actForm,  setActForm]  = useState({time:"09:00",title:"",type:"turismo",note:"",location:"",images:[]});
+  const [accForm,  setAccForm]  = useState({name:"",address:"",checkIn:"",checkOut:"",note:"",stars:3});
+  const [expForm,  setExpForm]  = useState({title:"",amount:"",currency:"EUR",category:"comida",paidBy:"",splitWith:[],customAmounts:{},splitMode:"equal",date:"",note:"",images:[]});
+
+  const syncTrip = (updated) => { setTrips(t=>t.map(x=>x.id===updated.id?updated:x)); setActiveTrip(updated); };
+  const openTrip = (trip) => { setActiveTrip(trip); setActiveDayIdx(0); setActiveTab("dias"); setView("detail"); };
+
+  usePWA();
+
+  // Auto-save to localStorage whenever trips change
+  useEffect(() => { saveTrips(trips); }, [trips]);
+
+  async function handlePDF(trip,e) {
+    e&&e.stopPropagation(); setPdfLoading(trip.id);
+    try { await generateTripPDF(trip); } catch(err){ console.error(err); alert("Error al generar el PDF."); }
+    setPdfLoading(null);
+  }
+
+  async function handleExpPDF(trip) {
+    setExpPdfLoad(true);
+    try { await generateExpensesPDF(trip); } catch(err){ console.error(err); alert("Error al generar el PDF de gastos."); }
+    setExpPdfLoad(false);
+  }
+
+  // TRIP
+  function saveTrip() {
+    if(!tripForm.title||!tripForm.startDate||!tripForm.endDate) return;
+    const n=daysBetween(tripForm.startDate,tripForm.endDate);
+    const newT={id:uid(),...tripForm,members:[],expenses:[],accommodations:[],days:genDays(tripForm.startDate,n)}; if(onAddTrip) onAddTrip(newT); else setTrips(t=>[...t,newT]);
+    setTripForm({title:"",destination:"",startDate:"",endDate:"",cover:"🌍",color:"#6366F1"});
+    setView("home");
+  }
+  function deleteTrip(id) { if(onDeleteTrip) onDeleteTrip(id, false); if(activeTrip?.id===id)setView("home"); }
+
+  // ACTIVITIES
+  function openNewAct(day) { setActiveDay(day); setActForm({time:"09:00",title:"",type:"turismo",note:"",location:"",images:[]}); setView("newActivity"); }
+  function saveAct() {
+    if(!actForm.title)return;
+    const u={...activeTrip,days:activeTrip.days.map(d=>d.id===activeDay.id?{...d,activities:[...d.activities,{id:uid(),...actForm}].sort((a,b)=>a.time.localeCompare(b.time))}:d)};
+    syncTrip(u); setView("detail");
+  }
+  function openEditAct(day,act) { setActiveDay(day); setEditingAct(act); setActForm({time:act.time,title:act.title,type:act.type,note:act.note,location:act.location||"",images:act.images||[]}); setView("editActivity"); }
+  function updateAct() {
+    if(!actForm.title)return;
+    const u={...activeTrip,days:activeTrip.days.map(d=>d.id===activeDay.id?{...d,activities:d.activities.map(a=>a.id===editingAct.id?{...a,...actForm}:a).sort((a,b)=>a.time.localeCompare(b.time))}:d)};
+    syncTrip(u);
+    // if coming from actDetail, sync activeAct too
+    if(activeAct?.id===editingAct.id){
+      const newDay=u.days.find(d=>d.id===activeDay.id);
+      if(newDay) setActiveAct(newDay.activities.find(a=>a.id===editingAct.id)||null);
+    }
+    setView(activeAct?"actDetail":"detail");
+  }
+  function deleteAct(dayId,actId) { syncTrip({...activeTrip,days:activeTrip.days.map(d=>d.id===dayId?{...d,activities:d.activities.filter(a=>a.id!==actId)}:d)}); }
+
+  function addImageToActivity(dayId, actId, dataUrl) {
+    const updated = {
+      ...activeTrip,
+      days: activeTrip.days.map(d => d.id===dayId ? {
+        ...d,
+        activities: d.activities.map(a => a.id===actId ? {
+          ...a, images: [...(a.images||[]), dataUrl]
+        } : a)
+      } : d)
+    };
+    syncTrip(updated);
+    // keep activeAct in sync
+    const newDay = updated.days.find(d=>d.id===dayId);
+    if(newDay) setActiveAct(newDay.activities.find(a=>a.id===actId)||null);
+  }
+
+  function removeImageFromActivity(dayId, actId, imgIdx) {
+    const updated = {
+      ...activeTrip,
+      days: activeTrip.days.map(d => d.id===dayId ? {
+        ...d,
+        activities: d.activities.map(a => a.id===actId ? {
+          ...a, images: (a.images||[]).filter((_,i)=>i!==imgIdx)
+        } : a)
+      } : d)
+    };
+    syncTrip(updated);
+    const newDay = updated.days.find(d=>d.id===dayId);
+    if(newDay) setActiveAct(newDay.activities.find(a=>a.id===actId)||null);
+  }
+
+  function handleImageUpload(dayId, actId, e) {
+    const files = Array.from(e.target.files||[]);
+    files.forEach(file => {
+      const reader = new FileReader();
+      reader.onload = ev => addImageToActivity(dayId, actId, ev.target.result);
+      reader.readAsDataURL(file);
+    });
+    e.target.value = ""; // reset input
+  }
+
+  // ACCOMMODATIONS
+  function openNewAcc() { setEditingAcc(null); setAccForm({name:"",address:"",checkIn:activeTrip?.startDate||"",checkOut:activeTrip?.endDate||"",note:"",stars:3}); setView("newAccommodation"); }
+  function saveAcc() { if(!accForm.name)return; syncTrip({...activeTrip,accommodations:[...(activeTrip.accommodations||[]),{id:uid(),...accForm}]}); setView("detail"); }
+  function openEditAcc(acc) { setEditingAcc(acc); setAccForm({name:acc.name,address:acc.address,checkIn:acc.checkIn,checkOut:acc.checkOut,note:acc.note,stars:acc.stars}); setView("editAccommodation"); }
+  function updateAcc() { if(!accForm.name)return; syncTrip({...activeTrip,accommodations:(activeTrip.accommodations||[]).map(a=>a.id===editingAcc.id?{...a,...accForm}:a)}); setView("detail"); }
+  function deleteAcc(id) { syncTrip({...activeTrip,accommodations:(activeTrip.accommodations||[]).filter(a=>a.id!==id)}); }
+  function openMaps(address) { window.open(mapsUrl(address),"_blank"); }
+
+  // MEMBERS
+  function addMember() {
+    if(!newMemberName.trim())return;
+    const m={id:uid(),name:newMemberName.trim(),avatar:newMemberAvatar};
+    syncTrip({...activeTrip,members:[...(activeTrip.members||[]),m]});
+    setNewMemberName(""); setShowAddMember(false);
+  }
+  function deleteMember(mid) {
+    const updated={...activeTrip,
+      members:(activeTrip.members||[]).filter(m=>m.id!==mid),
+      expenses:(activeTrip.expenses||[]).map(e=>({...e,
+        paidBy:e.paidBy===mid?"":(e.paidBy),
+        splitWith:(e.splitWith||[]).filter(id=>id!==mid)
+      }))
+    };
+    syncTrip(updated);
+  }
+
+  // EXPENSES
+  function openNewExp() {
+    const mems=activeTrip.members||[];
+    setEditingExp(null);
+    setExpForm({title:"",amount:"",currency:"EUR",category:"comida",paidBy:mems[0]?.id||"",splitWith:mems.map(m=>m.id),customAmounts:{},splitMode:"equal",date:activeTrip.startDate||"",note:"",images:[]});
+    setView("newExpense");
+  }
+  function saveExp() {
+    if(!expForm.title||!expForm.amount)return;
+    const e={id:uid(),...expForm,amount:parseFloat(expForm.amount)||0};
+    syncTrip({...activeTrip,expenses:[...(activeTrip.expenses||[]),e]});
+    setView("detail");
+  }
+  function openEditExp(exp) {
+    setEditingExp(exp);
+    setExpForm({title:exp.title,amount:String(exp.amount),currency:exp.currency,category:exp.category,paidBy:exp.paidBy,splitWith:exp.splitWith,customAmounts:exp.customAmounts||{},splitMode:exp.splitMode||"equal",date:exp.date,note:exp.note,images:exp.images||[]});
+    setView("editExpense");
+  }
+  function updateExp() {
+    if(!expForm.title||!expForm.amount)return;
+    const updated={...activeTrip,expenses:(activeTrip.expenses||[]).map(e=>e.id===editingExp.id?{...e,...expForm,amount:parseFloat(expForm.amount)||0}:e)};
+    syncTrip(updated); setView("detail");
+  }
+  function deleteExp(id) { syncTrip({...activeTrip,expenses:(activeTrip.expenses||[]).filter(e=>e.id!==id)}); }
+  function toggleSplitMember(mid) {
+    const sw=expForm.splitWith||[];
+    setExpForm({...expForm,splitWith:sw.includes(mid)?sw.filter(x=>x!==mid):[...sw,mid]});
+  }
+
+  // BALANCE (memoized)
+  const balanceData = useMemo(()=>{
+    if(!activeTrip)return null;
+    return calcBalances(activeTrip.members||[], activeTrip.expenses||[]);
+  },[activeTrip]);
+
+  // ── STYLES ──────────────────────────────────────────────────────────────────
+  const S = {
+    app:    {fontFamily:"'DM Sans','Helvetica Neue',sans-serif",background:"#0F0E17",minHeight:"100vh",maxWidth:430,margin:"0 auto",color:"#FFFFFE"},
+    scr:    {minHeight:"100vh",display:"flex",flexDirection:"column"},
+    hdr:    {padding:"56px 24px 20px",background:"linear-gradient(180deg,#1a1927 0%,transparent 100%)"},
+    hdrRow: {display:"flex",alignItems:"center",justifyContent:"space-between"},
+    addBtn: {width:44,height:44,borderRadius:14,background:"#FF6B6B",border:"none",color:"#fff",fontSize:24,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",boxShadow:"0 4px 16px rgba(255,107,107,0.4)"},
+    list:   {padding:"8px 20px 100px",display:"flex",flexDirection:"column",gap:16},
+    card:   c=>({borderRadius:24,background:`linear-gradient(135deg,${c}22,${c}11)`,border:`1px solid ${c}33`,overflow:"hidden",cursor:"pointer"}),
+    banner: c=>({background:`linear-gradient(135deg,${c},${c}BB)`,padding:"20px 20px 16px",position:"relative"}),
+    delX:   {position:"absolute",top:12,right:12,background:"rgba(0,0,0,0.25)",border:"none",color:"#fff",borderRadius:8,width:28,height:28,fontSize:14,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"},
+    meta:   {padding:"14px 20px 10px",display:"flex",gap:16},
+    mItem:  {fontSize:12,color:"#A7A9BE"},
+    mVal:   {fontSize:14,fontWeight:600,color:"#FFFFFE",marginTop:1},
+    cardActs:{display:"flex",gap:8,padding:"0 16px 14px"},
+    pdfBtn: (c,l)=>({flex:1,padding:"9px 0",borderRadius:12,border:`1.5px solid ${l?"#2D2C3E":c+"44"}`,cursor:"pointer",background:l?"#2D2C3E":`${c}22`,color:l?"#A7A9BE":c,fontSize:13,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center",gap:6}),
+    empty:  {flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:40,gap:12,textAlign:"center"},
+    form:   {padding:"56px 24px 100px",flex:1,overflowY:"auto"},
+    back:   {background:"none",border:"none",color:"#A7A9BE",fontSize:24,cursor:"pointer",padding:0,marginBottom:20},
+    fTitle: {fontSize:26,fontWeight:800,marginBottom:24,letterSpacing:"-0.4px"},
+    lbl:    {fontSize:12,fontWeight:600,color:"#A7A9BE",textTransform:"uppercase",letterSpacing:1,marginBottom:6,display:"block"},
+    inp:    {width:"100%",background:"#1C1B29",border:"1px solid #2D2C3E",borderRadius:14,padding:"14px 16px",color:"#FFFFFE",fontSize:15,outline:"none",boxSizing:"border-box",fontFamily:"inherit"},
+    sel:    {width:"100%",background:"#1C1B29",border:"1px solid #2D2C3E",borderRadius:14,padding:"14px 16px",color:"#FFFFFE",fontSize:15,outline:"none",boxSizing:"border-box",fontFamily:"inherit",appearance:"none"},
+    fg:     {marginBottom:18},
+    eg:     {display:"flex",flexWrap:"wrap",gap:10},
+    eo:     s=>({fontSize:28,padding:"6px 10px",borderRadius:12,cursor:"pointer",background:s?"#FF6B6B22":"#1C1B29",border:s?"2px solid #FF6B6B":"2px solid transparent"}),
+    cg:     {display:"flex",gap:10,flexWrap:"wrap"},
+    co:     (c,s)=>({width:32,height:32,borderRadius:10,background:c,cursor:"pointer",border:s?"3px solid #fff":"3px solid transparent",boxShadow:s?`0 0 0 2px ${c}`:"none"}),
+    primary:{width:"100%",padding:"16px",background:"#FF6B6B",border:"none",borderRadius:16,color:"#fff",fontSize:16,fontWeight:700,cursor:"pointer",marginTop:8,boxShadow:"0 8px 24px rgba(255,107,107,0.35)"},
+    // detail
+    dHdr:   c=>({background:`linear-gradient(160deg,${c},${c}88)`,padding:"56px 24px 20px"}),
+    dBack:  {background:"rgba(0,0,0,0.2)",border:"none",color:"#fff",borderRadius:10,padding:"6px 12px",fontSize:13,cursor:"pointer",marginBottom:12,display:"inline-flex",alignItems:"center",gap:4},
+    dPdf:   l=>({marginTop:14,padding:"10px 18px",borderRadius:12,border:"none",background:l?"rgba(0,0,0,0.2)":"rgba(255,255,255,0.2)",color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer",display:"inline-flex",alignItems:"center",gap:6}),
+    // tabs
+    secTabs:{display:"flex",background:"#13121F",borderBottom:"1px solid #1C1B29"},
+    secTab: a=>({flex:1,padding:"13px 0",border:"none",cursor:"pointer",background:"transparent",color:a?"#FFFFFE":"#A7A9BE",fontSize:13,fontWeight:a?700:500,borderBottom:a?"2px solid #FF6B6B":"2px solid transparent"}),
+    tabWrap:{background:"#13121F",overflowX:"auto",borderBottom:"1px solid #1C1B29"},
+    tabs:   {display:"flex",padding:"12px 16px",gap:8,minWidth:"max-content"},
+    tab:    a=>({padding:"8px 16px",borderRadius:12,cursor:"pointer",border:"none",background:a?"#FF6B6B":"#1C1B29",color:a?"#fff":"#A7A9BE",fontSize:13,fontWeight:a?700:500,whiteSpace:"nowrap"}),
+    subTabs:{display:"flex",gap:8,padding:"16px 20px 0"},
+    subTab: a=>({padding:"7px 16px",borderRadius:20,cursor:"pointer",border:"none",background:a?"#FF6B6B22":"#1C1B29",color:a?"#FF6B6B":"#A7A9BE",fontSize:13,fontWeight:a?700:500,border:a?"1.5px solid #FF6B6B44":"1.5px solid transparent"}),
+    // activity list
+    aList:  {padding:"16px 20px 100px",display:"flex",flexDirection:"column",gap:1},
+    aItem:  {display:"flex",alignItems:"flex-start",gap:14,padding:"16px 0",borderBottom:"1px solid #1C1B29"},
+    aTime:  {fontSize:12,fontWeight:700,color:"#A7A9BE",minWidth:44,marginTop:2},
+    aDot:   c=>({width:36,height:36,borderRadius:10,background:c+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,flexShrink:0}),
+    aCont:  {flex:1},
+    aTitle: {fontSize:15,fontWeight:600,color:"#FFFFFE",lineHeight:1.3},
+    aNote:  {fontSize:12,color:"#A7A9BE",marginTop:3},
+    aBtn:   {background:"none",border:"none",color:"#A7A9BE",fontSize:18,cursor:"pointer",padding:"0 4px"},
+    fab:    {position:"fixed",bottom:32,right:"calc(50% - 215px + 24px)",width:56,height:56,borderRadius:18,background:"#FF6B6B",border:"none",color:"#fff",fontSize:28,cursor:"pointer",boxShadow:"0 8px 24px rgba(255,107,107,0.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:100},
+    tg:     {display:"flex",flexWrap:"wrap",gap:8},
+    to:     (s,c)=>({padding:"8px 14px",borderRadius:12,cursor:"pointer",background:s?c+"33":"#1C1B29",color:s?c:"#A7A9BE",fontSize:13,fontWeight:s?700:500,border:s?`1.5px solid ${c}`:"1.5px solid transparent"}),
+    noItems:{textAlign:"center",padding:"48px 20px",color:"#A7A9BE",fontSize:14,lineHeight:1.8},
+    // accommodations
+    accList:{padding:"16px 20px 100px",display:"flex",flexDirection:"column",gap:12},
+    accCard:{borderRadius:18,background:"#1C1B29",border:"1px solid #2D2C3E",overflow:"hidden"},
+    accTop: {padding:"16px 16px 12px",display:"flex",gap:12,alignItems:"flex-start"},
+    accIcon:{width:44,height:44,borderRadius:12,background:"#A78BFA22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,flexShrink:0},
+    accBody:{flex:1,minWidth:0},
+    accBtns:{display:"flex",borderTop:"1px solid #2D2C3E"},
+    accBtn: c=>({flex:1,padding:"11px 0",border:"none",background:"transparent",color:c||"#A7A9BE",fontSize:13,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:5}),
+    accBtnD:{flex:1,padding:"11px 0",border:"none",background:"transparent",color:"#A7A9BE",fontSize:13,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:5,borderLeft:"1px solid #2D2C3E"},
+    starRow:{display:"flex",gap:8},
+    starBtn:(n,a)=>({fontSize:24,cursor:"pointer",background:"none",border:"none",color:a?"#FBBF24":"#2D2C3E",padding:"0 2px",lineHeight:1}),
+    spinner:{display:"inline-block",width:13,height:13,border:"2px solid rgba(255,255,255,0.3)",borderTopColor:"currentColor",borderRadius:"50%",animation:"spin 0.7s linear infinite"},
+    // expense styles
+    expList:{padding:"0 20px 100px",display:"flex",flexDirection:"column",gap:10},
+    expCard:{borderRadius:16,background:"#1C1B29",border:"1px solid #2D2C3E",overflow:"hidden"},
+    expTop: {padding:"14px 16px 10px",display:"flex",gap:12,alignItems:"flex-start"},
+    expIcon:c=>({width:40,height:40,borderRadius:11,background:c+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,flexShrink:0}),
+    expBody:{flex:1,minWidth:0},
+    expBtns:{display:"flex",borderTop:"1px solid #2D2C3E"},
+    expBtn: c=>({flex:1,padding:"10px 0",border:"none",background:"transparent",color:c||"#A7A9BE",fontSize:13,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:4}),
+    // members
+    memRow: {display:"flex",flexWrap:"wrap",gap:8,marginBottom:8},
+    memChip:(a)=>({display:"inline-flex",alignItems:"center",gap:6,padding:"6px 12px",borderRadius:20,background:a?"#FF6B6B22":"#1C1B29",border:a?"1.5px solid #FF6B6B44":"1.5px solid #2D2C3E",cursor:"pointer",fontSize:13,color:a?"#FF6B6B":"#FFFFFE",fontWeight:a?700:400}),
+    // balance
+    balCard:{borderRadius:16,background:"#1C1B29",border:"1px solid #2D2C3E",padding:"16px"},
+    balRow: {display:"flex",alignItems:"center",justifyContent:"space-between",padding:"10px 0",borderBottom:"1px solid #1C1B29"},
+    settRow:{display:"flex",alignItems:"center",gap:10,padding:"12px 0",borderBottom:"1px solid #1C1B29"},
+    badge:  c=>({background:c+"22",color:c,border:`1px solid ${c}33`,borderRadius:8,padding:"2px 8px",fontSize:11,fontWeight:700}),
+  };
+
+  const expSection = (accs) => {
+    const expenses = activeTrip?.expenses||[];
+    const members  = activeTrip?.members||[];
+    const totalExp = expenses.reduce((a,e)=>a+e.amount,0);
+    const currency = expenses[0]?.currency||"EUR";
+
+    return (
+      <div>
+        {/* summary bar */}
+        <div style={{margin:"16px 20px 0",borderRadius:16,background:"linear-gradient(135deg,#1C1B29,#2D2C3E)",border:"1px solid #2D2C3E",padding:"16px"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+            <div>
+              <div style={{fontSize:12,color:"#A7A9BE"}}>Total gastado</div>
+              <div style={{fontSize:28,fontWeight:800,color:"#FFFFFE",marginTop:2}}>{money(totalExp,currency)}</div>
+              <div style={{fontSize:12,color:"#A7A9BE",marginTop:2}}>{expenses.length} gasto{expenses.length!==1?"s":""}  ·  {members.length} persona{members.length!==1?"s":""}</div>
+            </div>
+            <div style={{fontSize:48}}>💸</div>
+          </div>
+          {/* member avatars */}
+          {members.length>0&&(
+            <div style={{marginTop:12,display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
+              {members.map(m=>(
+                <div key={m.id} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
+                  <div style={{width:36,height:36,borderRadius:12,background:"#FF6B6B22",border:"1px solid #FF6B6B33",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18}}>{m.avatar}</div>
+                  <div style={{fontSize:10,color:"#A7A9BE"}}>{m.name}</div>
+                </div>
+              ))}
+              <button onClick={()=>setShowAddMember(v=>!v)} style={{width:36,height:36,borderRadius:12,background:"#1C1B29",border:"1.5px dashed #2D2C3E",color:"#A7A9BE",fontSize:20,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>+</button>
+            </div>
+          )}
+          {/* add member inline */}
+          {(showAddMember||members.length===0)&&(
+            <div style={{marginTop:12,background:"#13121F",borderRadius:12,padding:"12px"}}>
+              <div style={{fontSize:12,color:"#A7A9BE",marginBottom:10,fontWeight:600,textTransform:"uppercase",letterSpacing:1}}>Añadir persona</div>
+              {/* Emoji grid */}
+              <div style={{display:"flex",flexWrap:"wrap",gap:8,marginBottom:12}}>
+                {["👨🏻","👩🏻","🧑🏼","👱🏻‍♀️","👨🏻‍🦳","👵🏻","👧🏻","👦🏻","👳🏽‍♀️","🧓🏻","🧑🏾‍🦱","👱🏻‍♂️"].map(av=>(
+                  <button key={av} onClick={()=>setNewMemberAvatar(av)} style={{
+                    fontSize:28, padding:"6px 8px", borderRadius:12, cursor:"pointer",
+                    background: newMemberAvatar===av ? "#FF6B6B22" : "#1C1B29",
+                    border: newMemberAvatar===av ? "2px solid #FF6B6B" : "2px solid transparent",
+                    transition:"all 0.1s",
+                  }}>{av}</button>
+                ))}
+                {/* Custom emoji button */}
+                {(()=>{
+                  const isCustom=!["👨🏻","👩🏻","🧑🏼","👱🏻‍♀️","👨🏻‍🦳","👵🏻","👧🏻","👦🏻","👳🏽‍♀️","🧓🏻","🧑🏾‍🦱","👱🏻‍♂️"].includes(newMemberAvatar);
+                  return (
+                    <div style={{position:"relative"}}>
+                      <button
+                        onClick={()=>{ const v=prompt("Escribe o pega tu emoji:",""); if(v&&v.trim()) setNewMemberAvatar(v.trim().slice(0,4)); }}
+                        style={{
+                          fontSize:isCustom?26:18, padding:"6px 8px", borderRadius:12, cursor:"pointer",
+                          background: isCustom ? "#FF6B6B22" : "#1C1B29",
+                          border: isCustom ? "2px solid #FF6B6B" : "2px dashed #2D2C3E",
+                          color: isCustom ? "inherit" : "#A7A9BE",
+                          minWidth:44, height:44, display:"flex", alignItems:"center", justifyContent:"center",
+                          transition:"all 0.1s",
+                        }}
+                      >{isCustom ? newMemberAvatar : "+"}</button>
+                    </div>
+                  );
+                })()}
+              </div>
+              {/* Name + button */}
+              <div style={{display:"flex",gap:8}}>
+                <input
+                  style={{...S.inp,flex:1,padding:"11px 14px",fontSize:15}}
+                  placeholder="Nombre..."
+                  value={newMemberName}
+                  onChange={e=>setNewMemberName(e.target.value)}
+                  onKeyDown={e=>e.key==="Enter"&&addMember()}
+                />
+                <button
+                  style={{padding:"11px 18px",borderRadius:12,background:"#FF6B6B",border:"none",color:"#fff",fontWeight:700,cursor:"pointer",fontSize:15,boxShadow:"0 4px 12px rgba(255,107,107,0.3)"}}
+                  onClick={addMember}
+                >OK</button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Manage members */}
+        {members.length>0&&(
+          <div style={{margin:"12px 20px 0",display:"flex",gap:8,flexWrap:"wrap"}}>
+            {members.map(m=>(
+              <div key={m.id} style={{display:"inline-flex",alignItems:"center",gap:6,background:"#1C1B29",border:"1px solid #2D2C3E",borderRadius:20,padding:"5px 10px"}}>
+                <span style={{fontSize:16}}>{m.avatar}</span>
+                <span style={{fontSize:13,color:"#FFFFFE"}}>{m.name}</span>
+                <button onClick={()=>deleteMember(m.id)} style={{background:"none",border:"none",color:"#F87171",fontSize:12,cursor:"pointer",padding:"0 0 0 4px"}}>✕</button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Sub tabs: Lista / Balance */}
+        <div style={{...S.subTabs, justifyContent:"space-between", alignItems:"center"}}>
+          <div style={{display:"flex",gap:8}}>
+            <button style={S.subTab(expSubTab==="lista")} onClick={()=>setExpSubTab("lista")}>📋 Lista</button>
+            <button style={S.subTab(expSubTab==="balance")} onClick={()=>setExpSubTab("balance")}>⚖️ Balance</button>
+          </div>
+          <button
+            onClick={()=>handleExpPDF(activeTrip)}
+            disabled={expPdfLoad||expenses.length===0}
+            style={{padding:"7px 14px",borderRadius:20,border:"1.5px solid #34D39944",background:expenses.length===0?"#1C1B29":"#34D39918",color:expenses.length===0?"#555":"#34D399",fontSize:12,fontWeight:700,cursor:expenses.length===0?"default":"pointer",display:"flex",alignItems:"center",gap:5,whiteSpace:"nowrap"}}
+          >
+            {expPdfLoad?<><span style={S.spinner}/> PDF...</>:<>⬇ PDF gastos</>}
+          </button>
+        </div>
+
+        {/* LIST */}
+        {expSubTab==="lista"&&(
+          <div style={S.expList}>
+            <div style={{height:12}}/>
+            {expenses.length===0&&(
+              <div style={S.noItems}>Sin gastos aún.<br/><span style={{fontSize:12}}>Toca + para añadir el primer gasto.</span></div>
+            )}
+            {expenses.map(exp=>{
+              const ec=EXP_CATS[exp.category]||EXP_CATS.otro;
+              const payer=members.find(m=>m.id===exp.paidBy);
+              const share=(exp.amount/(exp.splitWith?.length||1));
+              return (
+                <div key={exp.id} style={S.expCard}>
+                  <div style={S.expTop}>
+                    <div style={S.expIcon(ec.color)}>{ec.emoji}</div>
+                    <div style={S.expBody}>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
+                        <div style={{fontSize:15,fontWeight:700,color:"#FFFFFE",lineHeight:1.3,flex:1}}>{exp.title}</div>
+                        <div style={{fontSize:18,fontWeight:800,color:ec.color,whiteSpace:"nowrap"}}>{money(exp.amount,exp.currency)}</div>
+                      </div>
+                      <div style={{fontSize:12,color:"#A7A9BE",marginTop:4,display:"flex",gap:8,flexWrap:"wrap"}}>
+                        {payer&&<span>💳 {payer.avatar} {payer.name}</span>}
+                        <span>👥 {exp.splitWith?.length||0} persona{(exp.splitWith?.length||0)!==1?"s":""}</span>
+                      </div>
+                      {exp.note&&<div style={{fontSize:11,color:"#A7A9BE",marginTop:3}}>💬 {exp.note}</div>}
+                      <div style={{fontSize:11,color:"#A7A9BE",marginTop:3}}>📅 {fmt(exp.date)}</div>
+                      {/* Ticket thumbnails */}
+                      {(exp.images||[]).length>0&&(
+                        <div style={{display:"flex",gap:6,marginTop:8,flexWrap:"wrap"}}>
+                          {(exp.images||[]).slice(0,4).map((img,i)=>(
+                            <div key={i} style={{width:48,height:48,borderRadius:8,overflow:"hidden",border:`1px solid ${ec.color}44`,flexShrink:0}}>
+                              <img src={img} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}}/>
+                            </div>
+                          ))}
+                          {(exp.images||[]).length>4&&(
+                            <div style={{width:48,height:48,borderRadius:8,background:"#2D2C3E",display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,color:"#A7A9BE",flexShrink:0}}>
+                              +{exp.images.length-4}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  <div style={S.expBtns}>
+                    <button style={S.expBtn("#60A5FA")} onClick={()=>openEditExp(exp)}>✏️ Editar</button>
+                    <button style={{...S.expBtn("#F87171"),borderLeft:"1px solid #2D2C3E"}} onClick={()=>deleteExp(exp.id)}>🗑 Eliminar</button>
+                  </div>
+                </div>
+              );
+            })}
+            <div style={{height:20}}/>
+          </div>
+        )}
+
+        {/* BALANCE */}
+        {expSubTab==="balance"&&(
+          <div style={{padding:"16px 20px 100px",display:"flex",flexDirection:"column",gap:16}}>
+            {members.length===0&&<div style={S.noItems}>Añade personas para ver el balance.</div>}
+            {members.length>0&&balanceData&&(()=>{
+              const memberExpenses = selectedMember
+                ? expenses.filter(e => (e.splitWith||[]).includes(selectedMember.id) || e.paidBy===selectedMember.id)
+                : [];
+
+              return (
+              <>
+                {/* per-person balance */}
+                <div style={S.balCard}>
+                  <div style={{fontSize:13,fontWeight:700,color:"#A7A9BE",marginBottom:12,textTransform:"uppercase",letterSpacing:1}}>Balance por persona</div>
+                  <div style={{fontSize:11,color:"#A7A9BE",marginBottom:10}}>Toca una persona para ver sus gastos</div>
+                  {members.map(m=>{
+                    const n=balanceData.net[m.id]||0;
+                    const paid=balanceData.paid[m.id]||0;
+                    const owes=balanceData.owes[m.id]||0;
+                    const col=Math.abs(n)<0.01?"#A7A9BE":n>0?"#4ADE80":"#F87171";
+                    const label=Math.abs(n)<0.01?"Equilibrado":n>0?"Le deben":"Debe";
+                    const isSelected=selectedMember?.id===m.id;
+                    return (
+                      <div key={m.id}>
+                        <div
+                          onClick={()=>setSelectedMember(isSelected?null:m)}
+                          style={{...S.balRow,cursor:"pointer",borderRadius:12,padding:"10px 12px",background:isSelected?"#FF6B6B11":"transparent",border:isSelected?"1px solid #FF6B6B33":"1px solid transparent",transition:"all 0.15s"}}
+                        >
+                          <div style={{display:"flex",gap:10,alignItems:"center"}}>
+                            <div style={{width:38,height:38,borderRadius:11,background:"#FF6B6B22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:20}}>{m.avatar}</div>
+                            <div>
+                              <div style={{fontSize:15,fontWeight:700,color:"#FFFFFE"}}>{m.name}</div>
+                              <div style={{fontSize:11,color:"#A7A9BE"}}>Pagado {money(paid,currency)}  ·  Gastado {money(owes,currency)}</div>
+                            </div>
+                          </div>
+                          <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:4}}>
+                            <div style={{fontSize:17,fontWeight:800,color:col}}>{n>=0?"+":""}{money(Math.abs(n),currency)}</div>
+                            <div style={S.badge(col)}>{label}</div>
+                          </div>
+                        </div>
+
+                        {/* Expanded: gastos de esta persona */}
+                        {isSelected&&(
+                          <div style={{marginTop:4,marginBottom:8,borderRadius:12,overflow:"hidden",border:"1px solid #2D2C3E",background:"#13121F",animation:"fadeIn 0.2s ease"}}>
+                            <div style={{padding:"10px 14px",borderBottom:"1px solid #2D2C3E",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                              <div style={{fontSize:12,fontWeight:700,color:col,textTransform:"uppercase",letterSpacing:0.5}}>{m.name} · {memberExpenses.length} gasto{memberExpenses.length!==1?"s":""}</div>
+                              <div style={{fontSize:12,color:"#A7A9BE"}}>Total: {money(memberExpenses.reduce((a,e)=>{
+                                if(e.paidBy===m.id) return a;
+                                if(e.splitMode==="custom") return a+(parseFloat(e.customAmounts?.[m.id])||0);
+                                return a+(e.amount/(e.splitWith?.length||1));
+                              },0),currency)}</div>
+                            </div>
+                            {memberExpenses.length===0
+                              ? <div style={{padding:"16px",textAlign:"center",color:"#A7A9BE",fontSize:13}}>Sin gastos asignados</div>
+                              : memberExpenses.map(exp=>{
+                                  const ec=EXP_CATS[exp.category]||EXP_CATS.otro;
+                                  const payer=members.find(x=>x.id===exp.paidBy);
+                                  const isPayerThis=exp.paidBy===m.id;
+                                  let share=0;
+                                  if(exp.splitMode==="custom") share=parseFloat(exp.customAmounts?.[m.id])||0;
+                                  else if((exp.splitWith||[]).includes(m.id)) share=exp.amount/(exp.splitWith?.length||1);
+                                  return (
+                                    <div key={exp.id} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",borderBottom:"1px solid #1C1B29"}}>
+                                      <div style={{width:32,height:32,borderRadius:9,background:ec.color+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,flexShrink:0}}>{ec.emoji}</div>
+                                      <div style={{flex:1,minWidth:0}}>
+                                        <div style={{fontSize:13,fontWeight:600,color:"#FFFFFE",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{exp.title}</div>
+                                        <div style={{fontSize:11,color:"#A7A9BE",marginTop:2}}>
+                                          {isPayerThis
+                                            ? <span style={{color:"#4ADE80"}}>💳 Pagó {money(exp.amount,exp.currency)}</span>
+                                            : <span>Pagó {payer?.avatar} {payer?.name}</span>
+                                          }
+                                        </div>
+                                      </div>
+                                      <div style={{textAlign:"right",flexShrink:0}}>
+                                        <div style={{fontSize:13,fontWeight:700,color:isPayerThis?"#4ADE80":ec.color}}>
+                                          {isPayerThis?"+":"−"}{money(isPayerThis?exp.amount:share,exp.currency)}
+                                        </div>
+                                        <div style={{fontSize:10,color:"#A7A9BE"}}>
+                                          {isPayerThis?"cobrado":"su parte"}
+                                        </div>
+                                      </div>
+                                    </div>
+                                  );
+                                })
+                            }
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* settlements */}
+                <div style={S.balCard}>
+                  <div style={{fontSize:13,fontWeight:700,color:"#A7A9BE",marginBottom:4,textTransform:"uppercase",letterSpacing:1}}>Liquidaciones</div>
+                  <div style={{fontSize:12,color:"#A7A9BE",marginBottom:12}}>Transferencias mínimas para saldar las deudas</div>
+                  {balanceData.settlements.length===0
+                    ? <div style={{textAlign:"center",padding:"24px 0",color:"#4ADE80",fontSize:14,fontWeight:600}}>✅ ¡Todo está equilibrado!</div>
+                    : balanceData.settlements.map((s,i)=>{
+                        const fm=members.find(m=>m.id===s.from);
+                        const tm=members.find(m=>m.id===s.to);
+                        if(!fm||!tm)return null;
+                        return (
+                          <div key={i} style={S.settRow}>
+                            <div style={{width:36,height:36,borderRadius:11,background:"#F8717122",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18}}>{fm.avatar}</div>
+                            <div style={{flex:1}}>
+                              <div style={{fontSize:14,fontWeight:700,color:"#FFFFFE"}}>{fm.name} → {tm.name}</div>
+                              <div style={{fontSize:12,color:"#A7A9BE",marginTop:1}}>{fm.name} le paga a {tm.name}</div>
+                            </div>
+                            <div style={{fontSize:16,fontWeight:800,color:"#4ADE80"}}>{money(s.amount,currency)}</div>
+                            <div style={{width:36,height:36,borderRadius:11,background:"#4ADE8022",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18}}>{tm.avatar}</div>
+                          </div>
+                        );
+                      })
+                  }
+                </div>
+
+                {/* category breakdown */}
+                {expenses.length>0&&(()=>{
+                  const byCat={};
+                  expenses.forEach(e=>{ byCat[e.category]=(byCat[e.category]||0)+e.amount; });
+                  const sorted=Object.entries(byCat).sort((a,b)=>b[1]-a[1]);
+                  return (
+                    <div style={S.balCard}>
+                      <div style={{fontSize:13,fontWeight:700,color:"#A7A9BE",marginBottom:12,textTransform:"uppercase",letterSpacing:1}}>Gasto por categoría</div>
+                      {sorted.map(([cat,amt])=>{
+                        const ec=EXP_CATS[cat]||EXP_CATS.otro;
+                        const pct=totalExp>0?Math.round(amt/totalExp*100):0;
+                        return (
+                          <div key={cat} style={{marginBottom:10}}>
+                            <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
+                              <span style={{fontSize:13,color:"#FFFFFE"}}>{ec.emoji} {ec.label}</span>
+                              <span style={{fontSize:13,fontWeight:700,color:ec.color}}>{money(amt,currency)} <span style={{fontSize:11,color:"#A7A9BE"}}>({pct}%)</span></span>
+                            </div>
+                            <div style={{height:5,borderRadius:4,background:"#2D2C3E"}}>
+                              <div style={{height:5,borderRadius:4,background:ec.color,width:pct+"%",transition:"width 0.4s"}}/>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })()}
+              </>
+              );
+            })()}
+          </div>
+        )}
+
+        <button style={S.fab} onClick={openNewExp}>+</button>
+      </div>
+    );
+  };
+
+  // ── HOME ────────────────────────────────────────────────────────────────────
+  if(view==="home") return (
+    <div style={S.app}>
+      <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+      <InstallBanner />
+      <div style={S.scr}>
+        <div style={S.hdr}>
+          <div style={S.hdrRow}>
+            <div>
+              <div style={{fontSize:28,fontWeight:800,letterSpacing:"-0.5px"}}>Mis Viajes ✈️</div>
+              <div style={{fontSize:13,color:"#A7A9BE",marginTop:2}}>
+                {currentUser?.displayName||currentUser?.email||''}{currentUser?' · ':''}
+                {trips.length} {trips.length===1?"itinerario":"itinerarios"} · {syncing?<span style={{color:"#FBBF24"}}>↑ Guardando...</span>:<span style={{color:"#34D399"}}>✓ Guardado</span>}
+              </div>
+            </div>
+            <div style={{display:"flex",gap:8,alignItems:"center"}}>
+              {onLogout&&<button onClick={onLogout} style={{height:36,borderRadius:12,background:"#1C1B29",border:"1px solid #2D2C3E",color:"#A7A9BE",fontSize:12,fontWeight:600,cursor:"pointer",padding:"0 14px",whiteSpace:"nowrap"}}>Salir</button>}
+              {setShowJoin&&<button onClick={()=>setShowJoin(true)} style={{height:36,borderRadius:12,background:"#6366F122",border:"1px solid #6366F144",color:"#A78BFA",fontSize:12,fontWeight:600,cursor:"pointer",padding:"0 14px",whiteSpace:"nowrap"}}>🔗 Unirse</button>}
+              <button style={S.addBtn} onClick={()=>setView("newTrip")}>+</button>
+            </div>
+          </div>
+        </div>
+        {trips.length===0
+          ? <div style={S.empty}>
+              <div style={{fontSize:64}}>🗺️</div>
+              <div style={{fontSize:20,fontWeight:700}}>Sin viajes aún</div>
+              <div style={{fontSize:14,color:"#A7A9BE",lineHeight:1.6}}>Crea tu primer itinerario y planifica tu próxima aventura.</div>
+              <button style={{...S.primary,width:"auto",padding:"14px 32px",marginTop:20}} onClick={()=>setView("newTrip")}>+ Nuevo viaje</button>
+            </div>
+          : <div style={S.list}>
+              {trips.map(trip=>(
+                <div key={trip.id} style={S.card(trip.color)} onClick={()=>openTrip(trip)}>
+                  <div style={S.banner(trip.color)}>
+                    <button style={S.delX} onClick={e=>{e.stopPropagation();const isOwner=trip.owner_id===currentUser?.id||!trip.owner_id;setDeleteModal({trip,isOwner});setDeleteConfirm(false);}}>✕</button>
+                    <div style={{fontSize:48,lineHeight:1}}>{trip.cover}</div>
+                    <div style={{fontSize:22,fontWeight:800,color:"#fff",marginTop:8}}>{trip.title}</div>
+                    <div style={{fontSize:13,color:"rgba(255,255,255,0.8)",marginTop:2}}>📍 {trip.destination}</div>
+                  </div>
+                  <div style={S.meta}>
+                    {[["Inicio",fmt(trip.startDate)],["Fin",fmt(trip.endDate)],["Gastos",money(trip.expenses?.reduce((a,e)=>a+e.amount,0)||0,(trip.expenses?.[0]?.currency)||"EUR")],["Personas",(trip.members||[]).length]].map(([l,v])=>(
+                      <div key={l} style={S.mItem}><div>{l}</div><div style={S.mVal}>{v}</div></div>
+                    ))}
+                  </div>
+                  <div style={S.cardActs} onClick={e=>e.stopPropagation()}>
+                    <button style={S.pdfBtn(trip.color,pdfLoading===trip.id)} onClick={e=>handlePDF(trip,e)} disabled={pdfLoading===trip.id}>
+                      {pdfLoading===trip.id?<><span style={S.spinner}/> Generando PDF...</>:<>⬇ Descargar PDF</>}
+                    </button>
+                    {onGenerateInvite&&<button style={{flex:1,padding:"10px 0",borderRadius:12,border:"1px solid #6366F133",background:"#6366F111",color:"#A78BFA",fontSize:13,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:6}} onClick={e=>{e.stopPropagation();const code=trip.invite_code;if(code){navigator.clipboard?.writeText(code).catch(()=>{});alert(`Código: ${code}\n\nCompártelo con tus amigos.`);}else{onGenerateInvite(trip).then(c=>{if(c)alert(`Código: ${c}\n\nCompártelo.`);});}}}>🔗 {trip.invite_code?`Código: ${trip.invite_code}`:'Invitar amigos'}</button>}
+                  </div>
+                </div>
+              ))}
+            </div>
+        }
+        <div style={{height:40}}/>
+
+        {/* DELETE MODAL */}
+        {deleteModal&&(
+          <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.75)",zIndex:1000,display:"flex",alignItems:"flex-end",justifyContent:"center"}} onClick={()=>{setDeleteModal(null);setDeleteConfirm(false);}}>
+            <div style={{width:"100%",maxWidth:480,background:"#1C1B29",borderRadius:"24px 24px 0 0",padding:"28px 24px 48px",borderTop:"1px solid #2D2C3E"}} onClick={e=>e.stopPropagation()}>
+              {!deleteConfirm?(
+                <>
+                  <div style={{marginBottom:20}}>
+                    <div style={{fontSize:20,fontWeight:800,color:"#FFFFFE",marginBottom:6}}>{deleteModal.isOwner?'¿Qué quieres hacer?':'¿Salir del viaje?'}</div>
+                    <div style={{fontSize:14,color:"#A7A9BE",lineHeight:1.6}}><span style={{fontWeight:700,color:"#FFFFFE"}}>"{deleteModal.trip.title}"</span>{deleteModal.isOwner?' — Eres el creador. Puedes borrarlo para todos o solo salir tú.':' — El viaje seguirá existiendo para los demás miembros.'}</div>
+                  </div>
+                  <div style={{display:"flex",gap:10}}>
+                    <button onClick={()=>{setDeleteModal(null);setDeleteConfirm(false);}} style={{flex:1,padding:"14px 0",borderRadius:14,background:"#2D2C3E",border:"none",color:"#A7A9BE",fontSize:15,fontWeight:600,cursor:"pointer"}}>Cancelar</button>
+                    {deleteModal.isOwner?(
+                      <div style={{display:"flex",gap:8,flex:2}}>
+                        <button onClick={()=>{onDeleteTrip?onDeleteTrip(deleteModal.trip.id,false):deleteTrip(deleteModal.trip.id);setDeleteModal(null);}} style={{flex:1,padding:"14px 0",borderRadius:14,background:"#F59E0B22",border:"1px solid #F59E0B44",color:"#F59E0B",fontSize:14,fontWeight:700,cursor:"pointer"}}>Solo para mí</button>
+                        <button onClick={()=>setDeleteConfirm(true)} style={{flex:1,padding:"14px 0",borderRadius:14,background:"#F8717122",border:"1px solid #F8717144",color:"#F87171",fontSize:14,fontWeight:700,cursor:"pointer"}}>Borrar para todos</button>
+                      </div>
+                    ):(
+                      <button onClick={()=>{onDeleteTrip?onDeleteTrip(deleteModal.trip.id,false):deleteTrip(deleteModal.trip.id);setDeleteModal(null);}} style={{flex:1,padding:"14px 0",borderRadius:14,background:"#F8717122",border:"1px solid #F8717144",color:"#F87171",fontSize:15,fontWeight:700,cursor:"pointer"}}>Confirmar</button>
+                    )}
+                  </div>
+                </>
+              ):(
+                <>
+                  <div style={{marginBottom:20}}>
+                    <div style={{fontSize:20,fontWeight:800,color:"#F87171",marginBottom:6}}>⚠️ Borrar para todos</div>
+                    <div style={{fontSize:14,color:"#A7A9BE",lineHeight:1.6}}>Esto borrará <span style={{fontWeight:700,color:"#FFFFFE"}}>"{deleteModal.trip.title}"</span> permanentemente para ti y todos los miembros. No se puede deshacer.</div>
+                  </div>
+                  <div style={{display:"flex",gap:10}}>
+                    <button onClick={()=>setDeleteConfirm(false)} style={{flex:1,padding:"14px 0",borderRadius:14,background:"#2D2C3E",border:"none",color:"#A7A9BE",fontSize:15,fontWeight:600,cursor:"pointer"}}>Volver</button>
+                    <button onClick={()=>{onDeleteTrip?onDeleteTrip(deleteModal.trip.id,true):deleteTrip(deleteModal.trip.id);setDeleteModal(null);setDeleteConfirm(false);}} style={{flex:1,padding:"14px 0",borderRadius:14,background:"#F87171",border:"none",color:"#fff",fontSize:15,fontWeight:700,cursor:"pointer"}}>Sí, borrar para todos</button>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* JOIN MODAL */}
+        {showJoin&&(
+          <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",zIndex:999,display:"flex",alignItems:"flex-end",justifyContent:"center"}} onClick={()=>setShowJoin(false)}>
+            <div style={{width:"100%",maxWidth:480,background:"#1C1B29",borderRadius:"24px 24px 0 0",padding:"28px 24px 48px",borderTop:"1px solid #2D2C3E"}} onClick={e=>e.stopPropagation()}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
+                <div><div style={{fontSize:20,fontWeight:800,color:"#FFFFFE"}}>Unirse a un viaje</div><div style={{fontSize:13,color:"#A7A9BE",marginTop:3}}>Introduce el código que te han compartido</div></div>
+                <button onClick={()=>setShowJoin(false)} style={{background:"#2D2C3E",border:"none",color:"#A7A9BE",width:32,height:32,borderRadius:10,cursor:"pointer",fontSize:16}}>✕</button>
+              </div>
+              {joinSuccess?(
+                <div style={{textAlign:"center",padding:"24px 0"}}><div style={{fontSize:48,marginBottom:12}}>🎉</div><div style={{fontSize:16,fontWeight:700,color:"#34D399"}}>{joinSuccess}</div></div>
+              ):(
+                <>
+                  {joinError&&<div style={{background:"#F8717118",border:"1px solid #F87171",borderRadius:12,padding:"10px 14px",color:"#F87171",fontSize:13,marginBottom:14}}>{joinError}</div>}
+                  <div style={{display:"flex",gap:10}}>
+                    <input value={joinCode} onChange={e=>setJoinCode(e.target.value.toUpperCase())} onKeyDown={e=>e.key==="Enter"&&onJoin(joinCode)} placeholder="Ej: VERANO7" maxLength={8} style={{flex:1,background:"#13121F",border:"1px solid #2D2C3E",borderRadius:14,padding:"14px 16px",color:"#FFFFFE",fontSize:18,fontWeight:700,letterSpacing:3,textTransform:"uppercase",outline:"none",textAlign:"center"}}/>
+                    <button onClick={()=>onJoin(joinCode)} disabled={joinLoading||!joinCode.trim()} style={{padding:"14px 20px",borderRadius:14,background:"#6366F1",border:"none",color:"#fff",fontWeight:700,fontSize:15,cursor:"pointer",opacity:joinLoading||!joinCode.trim()?0.6:1}}>{joinLoading?"...":"Unirse"}</button>
+                  </div>
+                  <div style={{fontSize:12,color:"#A7A9BE",textAlign:"center",marginTop:14}}>Pide a tu amigo que pulse <strong style={{color:"#A78BFA"}}>🔗 Invitar amigos</strong> en su viaje</div>
+                </>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+
+  // ── NEW TRIP ─────────────────────────────────────────────────────────────────
+  if(view==="newTrip") return (
+    <div style={S.app}><div style={{...S.scr,...S.form}}>
+      <button style={S.back} onClick={()=>setView("home")}>←</button>
+      <div style={S.fTitle}>Nuevo Viaje 🗺️</div>
+      <div style={S.fg}><label style={S.lbl}>Nombre del viaje</label><input style={S.inp} placeholder="Ej: Tokyo Adventure" value={tripForm.title} onChange={e=>setTripForm({...tripForm,title:e.target.value})}/></div>
+      <div style={S.fg}><label style={S.lbl}>Destino</label><input style={S.inp} placeholder="Ej: Japón" value={tripForm.destination} onChange={e=>setTripForm({...tripForm,destination:e.target.value})}/></div>
+      <div style={S.fg}>
+        <label style={S.lbl}>Fecha de inicio</label>
+        <input type="date" style={{...S.inp,fontSize:15,padding:"12px 14px",color:"#FFFFFE"}} value={tripForm.startDate} onChange={e=>setTripForm({...tripForm,startDate:e.target.value})}/>
+      </div>
+      <div style={S.fg}>
+        <label style={S.lbl}>Fecha de fin</label>
+        <input type="date" style={{...S.inp,fontSize:15,padding:"12px 14px",color:"#FFFFFE"}} value={tripForm.endDate} onChange={e=>setTripForm({...tripForm,endDate:e.target.value})}/>
+      </div>
+      <div style={S.fg}><label style={S.lbl}>Emoji</label><div style={S.eg}>{EMOJIS.map(e=><button key={e} style={S.eo(tripForm.cover===e)} onClick={()=>setTripForm({...tripForm,cover:e})}>{e}</button>)}</div></div>
+      <div style={S.fg}><label style={S.lbl}>Color</label><div style={S.cg}>{COLORS.map(c=><div key={c} style={S.co(c,tripForm.color===c)} onClick={()=>setTripForm({...tripForm,color:c})}/>)}</div></div>
+      <button style={S.primary} onClick={saveTrip}>Crear Itinerario</button>
+    </div></div>
+  );
+
+  // ── DETAIL ───────────────────────────────────────────────────────────────────
+  if(view==="detail"&&activeTrip){
+    const day=activeTrip.days[activeDayIdx];
+    const accs=activeTrip.accommodations||[];
+    const exps=activeTrip.expenses||[];
+    const totalExp=exps.reduce((a,e)=>a+e.amount,0);
+    return (
+      <div style={S.app}>
+        <div style={S.scr}>
+          <div style={S.dHdr(activeTrip.color)}>
+            <button style={S.dBack} onClick={()=>setView("home")}>← Volver</button>
+            <div style={{fontSize:52,lineHeight:1}}>{activeTrip.cover}</div>
+            <div style={{fontSize:26,fontWeight:900,color:"#fff",marginTop:6,letterSpacing:"-0.5px"}}>{activeTrip.title}</div>
+            <div style={{fontSize:13,color:"rgba(255,255,255,0.8)",marginTop:3}}>📍 {activeTrip.destination}</div>
+            <div style={{fontSize:12,color:"rgba(255,255,255,0.65)",marginTop:5}}>{fmt(activeTrip.startDate)} → {fmt(activeTrip.endDate)} · {daysBetween(activeTrip.startDate,activeTrip.endDate)} días</div>
+            <button style={S.dPdf(pdfLoading===activeTrip.id)} onClick={()=>handlePDF(activeTrip)} disabled={pdfLoading===activeTrip.id}>
+              {pdfLoading===activeTrip.id?<><span style={S.spinner}/> Generando...</>:<>⬇ Descargar PDF</>}
+            </button>
+          </div>
+
+          {/* Section tabs */}
+          <div style={S.secTabs}>
+            {[
+              ["dias",    "🗓 Días"],
+              ["alojamiento","🏨 Aloj."],
+              ["gastos",  "💸 Gastos"],
+            ].map(([k,l])=>(
+              <button key={k} style={S.secTab(activeTab===k)} onClick={()=>setActiveTab(k)}>
+                {l}
+                {k==="gastos"&&exps.length>0&&<span style={{background:"#34D399",color:"#000",borderRadius:8,padding:"1px 6px",fontSize:10,marginLeft:4,fontWeight:800}}>{money(totalExp,exps[0]?.currency||"EUR")}</span>}
+                {k==="alojamiento"&&accs.length>0&&<span style={{background:"#A78BFA",color:"#fff",borderRadius:8,padding:"1px 6px",fontSize:10,marginLeft:4}}>{accs.length}</span>}
+              </button>
+            ))}
+          </div>
+
+          {/* ── DÍAS TAB ── */}
+          {activeTab==="dias"&&<>
+            <div style={S.tabWrap}>
+              <div style={S.tabs}>
+                {activeTrip.days.map((d,i)=>{
+                  const dt=new Date(d.date+"T12:00:00");
+                  return <button key={d.id} style={S.tab(activeDayIdx===i)} onClick={()=>setActiveDayIdx(i)}>Día {i+1} · {dt.toLocaleDateString("es-ES",{day:"numeric",month:"short"})}</button>;
+                })}
+              </div>
+            </div>
+            {day&&(
+              <div style={S.aList}>
+                {accs.filter(a=>day.date>=a.checkIn&&day.date<a.checkOut).map(a=>(
+                  <div key={a.id} style={{background:"#A78BFA18",border:"1px solid #A78BFA33",borderRadius:12,padding:"10px 14px",marginBottom:8,display:"flex",alignItems:"center",gap:10,cursor:"pointer"}} onClick={()=>openMaps(a.address)}>
+                    <span style={{fontSize:18}}>🏨</span>
+                    <div style={{flex:1}}>
+                      <div style={{fontSize:13,fontWeight:700,color:"#A78BFA"}}>{a.name}</div>
+                      <div style={{fontSize:11,color:"#A7A9BE",marginTop:1}}>Toca para ver en Maps →</div>
+                    </div>
+                  </div>
+                ))}
+                {day.activities.length===0&&accs.filter(a=>day.date>=a.checkIn&&day.date<a.checkOut).length===0&&(
+                  <div style={S.noItems}>Sin actividades aún.<br/>Toca + para agregar una.</div>
+                )}
+                {day.activities.map(act=>{
+                  const tc=TYPE_CONFIG[act.type]||TYPE_CONFIG.actividad;
+                  return (
+                    <div key={act.id} style={{...S.aItem, cursor:"pointer"}} onClick={()=>{setActiveDay(day);setActiveAct(act);setLightbox(null);setView("actDetail");}}>
+                      <div style={S.aTime}>{act.time}</div>
+                      <div style={S.aDot(tc.color)}>{tc.emoji}</div>
+                      <div style={S.aCont}>
+                        <div style={S.aTitle}>{act.title}</div>
+                        {act.note&&<div style={S.aNote}>{act.note}</div>}
+                        <div style={{display:"flex",gap:8,marginTop:3,flexWrap:"wrap"}}>
+                          {act.location&&<span style={{fontSize:11,color:"#34D399"}}>📍 {act.location.length>28?act.location.slice(0,28)+"…":act.location}</span>}
+                          {(act.images||[]).length>0&&<span style={{fontSize:11,color:"#A7A9BE"}}>🖼 {act.images.length} foto{act.images.length!==1?"s":""}</span>}
+                        </div>
+                      </div>
+                      <div style={{display:"flex",gap:0}}>
+                        <button style={S.aBtn} onClick={e=>{e.stopPropagation();openEditAct(day,act);}}>✏️</button>
+                        <button style={S.aBtn} onClick={e=>{e.stopPropagation();deleteAct(day.id,act.id);}}>🗑</button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            <button style={S.fab} onClick={()=>openNewAct(day)}>+</button>
+          </>}
+
+          {/* ── ALOJAMIENTO TAB ── */}
+          {activeTab==="alojamiento"&&(
+            <div style={S.accList}>
+              {accs.length===0&&<div style={S.noItems}>Sin alojamientos añadidos.<br/><span style={{fontSize:12}}>Agrega hoteles, Airbnb, etc.</span></div>}
+              {accs.map(acc=>(
+                <div key={acc.id} style={S.accCard}>
+                  <div style={S.accTop}>
+                    <div style={S.accIcon}>🏨</div>
+                    <div style={S.accBody}>
+                      <div style={{fontSize:16,fontWeight:700,color:"#FFFFFE"}}>{acc.name}</div>
+                      <div style={{fontSize:12,color:"#FBBF24",marginTop:2}}>{"★".repeat(acc.stars||0)}{"☆".repeat(5-(acc.stars||0))}</div>
+                      <div style={{fontSize:12,color:"#A7A9BE",marginTop:4}}>📅 {fmt(acc.checkIn)} → {fmt(acc.checkOut)}</div>
+                      {acc.address&&<div style={{fontSize:12,color:"#60A5FA",marginTop:4}}>📍 {acc.address}</div>}
+                      {acc.note&&<div style={{fontSize:12,color:"#A7A9BE",marginTop:3}}>💬 {acc.note}</div>}
+                    </div>
+                  </div>
+                  <div style={S.accBtns}>
+                    <button style={S.accBtn("#4ADE80")} onClick={()=>openMaps(acc.address||acc.name)}>🗺 Google Maps</button>
+                    <button style={S.accBtnD} onClick={()=>openEditAcc(acc)}>✏️ Editar</button>
+                    <button style={{...S.accBtnD,color:"#F87171"}} onClick={()=>deleteAcc(acc.id)}>🗑</button>
+                  </div>
+                </div>
+              ))}
+              <button style={{...S.primary,marginTop:8}} onClick={openNewAcc}>+ Añadir alojamiento</button>
+            </div>
+          )}
+
+          {/* ── GASTOS TAB ── */}
+          {activeTab==="gastos"&&expSection(accs)}
+        </div>
+      </div>
+    );
+  }
+
+  // ── ACTIVITY FORM ─────────────────────────────────────────────────────────────
+  if((view==="newActivity"||view==="editActivity")&&activeDay){
+    const isEdit=view==="editActivity";
+    const tc=TYPE_CONFIG[actForm.type]||TYPE_CONFIG.actividad;
+    const formImages=actForm.images||[];
+
+    function handleFormImageUpload(e){
+      const files=Array.from(e.target.files||[]);
+      files.forEach(file=>{
+        const reader=new FileReader();
+        reader.onload=ev=>setActForm(f=>({...f,images:[...(f.images||[]),ev.target.result]}));
+        reader.readAsDataURL(file);
+      });
+      e.target.value="";
+    }
+    function removeFormImage(idx){
+      setActForm(f=>({...f,images:(f.images||[]).filter((_,i)=>i!==idx)}));
+    }
+
+    return (
+      <div style={S.app}><div style={{...S.scr,...S.form}}>
+        <button style={S.back} onClick={()=>setView(isEdit&&activeAct?"actDetail":"detail")}>←</button>
+        <div style={S.fTitle}>{isEdit?"Editar actividad":"Nueva actividad"}</div>
+
+        <div style={S.fg}><label style={S.lbl}>Hora</label><input type="time" style={{...S.inp,fontSize:14,padding:"10px 12px",maxWidth:140}} value={actForm.time} onChange={e=>setActForm({...actForm,time:e.target.value})}/></div>
+        <div style={S.fg}><label style={S.lbl}>Nombre</label><input style={S.inp} placeholder="Ej: Visita al museo" value={actForm.title} onChange={e=>setActForm({...actForm,title:e.target.value})}/></div>
+        <div style={S.fg}><label style={S.lbl}>Tipo</label>
+          <div style={S.tg}>{Object.entries(TYPE_CONFIG).map(([k,v])=>(
+            <button key={k} style={S.to(actForm.type===k,v.color)} onClick={()=>setActForm({...actForm,type:k})}>{v.emoji} {v.label}</button>
+          ))}</div>
+        </div>
+        <div style={S.fg}><label style={S.lbl}>Nota (opcional)</label><input style={S.inp} placeholder="Detalles, confirmación, etc." value={actForm.note} onChange={e=>setActForm({...actForm,note:e.target.value})}/></div>
+
+        {/* ── LOCATION ── */}
+        <div style={S.fg}>
+          <label style={S.lbl}>📍 Ubicación (Google Maps)</label>
+          <input
+            style={S.inp}
+            placeholder="Ej: Senso-ji Temple, Asakusa, Tokyo"
+            value={actForm.location}
+            onChange={e=>setActForm({...actForm,location:e.target.value})}
+          />
+          {actForm.location&&(
+            <button
+              style={{marginTop:8,padding:"8px 14px",borderRadius:10,border:"none",background:"#1C4532",color:"#4ADE80",fontSize:13,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",gap:6}}
+              onClick={()=>window.open(mapsUrl(actForm.location),"_blank")}
+            >🗺 Previsualizar en Google Maps</button>
+          )}
+        </div>
+        <div style={S.fg}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+            <label style={{...S.lbl,marginBottom:0}}>📸 Fotos {formImages.length>0&&<span style={{color:tc.color,fontWeight:700}}>({formImages.length})</span>}</label>
+            <label style={{padding:"6px 14px",borderRadius:10,background:tc.color+"22",border:`1.5px solid ${tc.color}44`,color:tc.color,fontSize:12,fontWeight:700,cursor:"pointer"}}>
+              + Añadir foto
+              <input type="file" accept="image/*" multiple style={{display:"none"}} onChange={handleFormImageUpload}/>
+            </label>
+          </div>
+
+          {formImages.length===0&&(
+            <label style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:8,padding:"24px 16px",borderRadius:14,border:`2px dashed ${tc.color}33`,background:tc.color+"08",cursor:"pointer"}}>
+              <div style={{fontSize:36}}>📷</div>
+              <div style={{fontSize:13,color:"#A7A9BE"}}>Toca para añadir fotos desde tu carrete</div>
+              <input type="file" accept="image/*" multiple style={{display:"none"}} onChange={handleFormImageUpload}/>
+            </label>
+          )}
+
+          {formImages.length>0&&(
+            <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6}}>
+              {formImages.map((img,i)=>(
+                <div key={i} style={{position:"relative",borderRadius:10,overflow:"hidden",aspectRatio:"1",background:"#1C1B29"}}>
+                  <img src={img} alt="" style={{width:"100%",height:"100%",objectFit:"cover",display:"block"}}/>
+                  <button
+                    onClick={()=>removeFormImage(i)}
+                    style={{position:"absolute",top:4,right:4,width:22,height:22,borderRadius:6,background:"rgba(0,0,0,0.7)",border:"none",color:"#fff",fontSize:12,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}
+                  >✕</button>
+                </div>
+              ))}
+              <label style={{borderRadius:10,aspectRatio:"1",background:"#1C1B29",border:`2px dashed ${tc.color}44`,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:4,cursor:"pointer"}}>
+                <div style={{fontSize:22,color:tc.color}}>+</div>
+                <div style={{fontSize:10,color:"#A7A9BE"}}>Más</div>
+                <input type="file" accept="image/*" multiple style={{display:"none"}} onChange={handleFormImageUpload}/>
+              </label>
+            </div>
+          )}
+        </div>
+
+        <button style={S.primary} onClick={isEdit?updateAct:saveAct}>{isEdit?"Guardar cambios":"Agregar actividad"}</button>
+      </div></div>
+    );
+  }
+
+  // ── ACCOMMODATION FORM ───────────────────────────────────────────────────────
+  if(view==="newAccommodation"||view==="editAccommodation"){
+    const isEdit=view==="editAccommodation";
+    return (
+      <div style={S.app}><div style={{...S.scr,...S.form}}>
+        <button style={S.back} onClick={()=>setView("detail")}>←</button>
+        <div style={S.fTitle}>{isEdit?"Editar alojamiento":"Nuevo alojamiento 🏨"}</div>
+        <div style={S.fg}><label style={S.lbl}>Nombre</label><input style={S.inp} placeholder="Ej: Hotel Shinjuku Granbell" value={accForm.name} onChange={e=>setAccForm({...accForm,name:e.target.value})}/></div>
+        <div style={S.fg}>
+          <label style={S.lbl}>Dirección (para Google Maps)</label>
+          <input style={S.inp} placeholder="Ej: Shinjuku, Tokyo, Japan" value={accForm.address} onChange={e=>setAccForm({...accForm,address:e.target.value})}/>
+          {accForm.address&&<button style={{marginTop:8,padding:"8px 14px",borderRadius:10,border:"none",background:"#1C4532",color:"#4ADE80",fontSize:13,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",gap:6}} onClick={()=>openMaps(accForm.address)}>🗺 Previsualizar en Maps</button>}
+        </div>
+        <div style={{display:"flex",gap:12,...S.fg}}>
+          <div style={{flex:1}}><label style={S.lbl}>Check-in</label><input type="date" style={{...S.inp,fontSize:14,padding:"10px 12px"}} value={accForm.checkIn} onChange={e=>setAccForm({...accForm,checkIn:e.target.value})}/></div>
+          <div style={{flex:1}}><label style={S.lbl}>Check-out</label><input type="date" style={{...S.inp,fontSize:14,padding:"10px 12px"}} value={accForm.checkOut} onChange={e=>setAccForm({...accForm,checkOut:e.target.value})}/></div>
+        </div>
+        <div style={S.fg}><label style={S.lbl}>Estrellas</label>
+          <div style={S.starRow}>
+            {STARS.map(n=><button key={n} style={S.starBtn(n,n<=(accForm.stars||0))} onClick={()=>setAccForm({...accForm,stars:n})}>★</button>)}
+            <span style={{color:"#A7A9BE",fontSize:13,alignSelf:"center",marginLeft:4}}>{accForm.stars} estrella{accForm.stars!==1?"s":""}</span>
+          </div>
+        </div>
+        <div style={S.fg}><label style={S.lbl}>Nota</label><input style={S.inp} placeholder="Reserva #4521 · Desayuno incluido" value={accForm.note} onChange={e=>setAccForm({...accForm,note:e.target.value})}/></div>
+        <button style={S.primary} onClick={isEdit?updateAcc:saveAcc}>{isEdit?"Guardar cambios":"Añadir alojamiento"}</button>
+      </div></div>
+    );
+  }
+
+  // ── EXPENSE FORM ─────────────────────────────────────────────────────────────
+  if(view==="newExpense"||view==="editExpense"){
+    const isEdit=view==="editExpense";
+    const members=activeTrip?.members||[];
+    return (
+      <div style={S.app}><div style={{...S.scr,...S.form}}>
+        <button style={S.back} onClick={()=>setView("detail")}>←</button>
+        <div style={S.fTitle}>{isEdit?"Editar gasto":"Nuevo gasto 💸"}</div>
+
+        <div style={S.fg}><label style={S.lbl}>Descripción</label><input style={S.inp} placeholder="Ej: Cena en restaurante" value={expForm.title} onChange={e=>setExpForm({...expForm,title:e.target.value})}/></div>
+
+        <div style={{display:"flex",gap:12,...S.fg}}>
+          <div style={{flex:2}}>
+            <label style={S.lbl}>Importe</label>
+            <input type="number" inputMode="decimal" style={S.inp} placeholder="0.00" value={expForm.amount} onChange={e=>setExpForm({...expForm,amount:e.target.value})}/>
+          </div>
+          <div style={{flex:1}}>
+            <label style={S.lbl}>Moneda</label>
+            <select style={S.sel} value={expForm.currency} onChange={e=>setExpForm({...expForm,currency:e.target.value})}>
+              {CURRENCIES.map(c=><option key={c} value={c}>{c}</option>)}
+            </select>
+          </div>
+        </div>
+
+        <div style={S.fg}><label style={S.lbl}>Categoría</label>
+          <div style={S.tg}>{Object.entries(EXP_CATS).map(([k,v])=>(
+            <button key={k} style={S.to(expForm.category===k,v.color)} onClick={()=>setExpForm({...expForm,category:k})}>{v.emoji} {v.label}</button>
+          ))}</div>
+        </div>
+
+        <div style={S.fg}><label style={S.lbl}>Pagado por</label>
+          {members.length===0
+            ? <div style={{fontSize:13,color:"#F87171",padding:"10px 0"}}>⚠️ Añade personas primero en la pestaña Gastos.</div>
+            : <div style={S.tg}>{members.map(m=>(
+                <button key={m.id} style={S.to(expForm.paidBy===m.id,"#FF6B6B")} onClick={()=>setExpForm({...expForm,paidBy:m.id})}>{m.avatar} {m.name}</button>
+              ))}</div>
+          }
+        </div>
+
+        <div style={S.fg}>
+          <label style={S.lbl}>Dividir entre</label>
+
+          {/* Mode toggle */}
+          <div style={{display:"flex",gap:8,marginBottom:12}}>
+            <button
+              onClick={()=>setExpForm({...expForm,splitMode:"equal"})}
+              style={{flex:1,padding:"9px 0",borderRadius:12,border:`1.5px solid ${expForm.splitMode!=="custom"?"#34D399":"#2D2C3E"}`,background:expForm.splitMode!=="custom"?"#34D39922":"#1C1B29",color:expForm.splitMode!=="custom"?"#34D399":"#A7A9BE",fontWeight:expForm.splitMode!=="custom"?700:500,fontSize:13,cursor:"pointer"}}
+            >⚖️ Partes iguales</button>
+            <button
+              onClick={()=>setExpForm({...expForm,splitMode:"custom"})}
+              style={{flex:1,padding:"9px 0",borderRadius:12,border:`1.5px solid ${expForm.splitMode==="custom"?"#FBBF24":"#2D2C3E"}`,background:expForm.splitMode==="custom"?"#FBBF2422":"#1C1B29",color:expForm.splitMode==="custom"?"#FBBF24":"#A7A9BE",fontWeight:expForm.splitMode==="custom"?700:500,fontSize:13,cursor:"pointer"}}
+            >✏️ Personalizado</button>
+          </div>
+
+          {/* EQUAL MODE */}
+          {expForm.splitMode!=="custom"&&(
+            <>
+              <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                {members.map(m=>{
+                  const sel=(expForm.splitWith||[]).includes(m.id);
+                  return (
+                    <button key={m.id} onClick={()=>toggleSplitMember(m.id)}
+                      style={{display:"flex",alignItems:"center",gap:6,padding:"8px 12px",borderRadius:12,border:`1.5px solid ${sel?"#34D399":"#2D2C3E"}`,background:sel?"#34D39922":"#1C1B29",color:sel?"#34D399":"#A7A9BE",cursor:"pointer",fontSize:13,fontWeight:sel?700:400}}>
+                      <span>{m.avatar}</span><span>{m.name}</span>
+                      {sel&&<span style={{fontSize:10,background:"#34D399",color:"#000",borderRadius:6,padding:"0 5px",fontWeight:800}}>✓</span>}
+                    </button>
+                  );
+                })}
+                {members.length>0&&<button onClick={()=>setExpForm({...expForm,splitWith:members.map(m=>m.id)})} style={{padding:"8px 12px",borderRadius:12,border:"1.5px solid #2D2C3E",background:"transparent",color:"#A7A9BE",cursor:"pointer",fontSize:12}}>Todos ✓</button>}
+              </div>
+              {(expForm.splitWith?.length||0)>0&&expForm.amount&&(
+                <div style={{marginTop:8,fontSize:12,color:"#34D399"}}>
+                  ÷ {expForm.splitWith.length} persona{expForm.splitWith.length!==1?"s":""}  =  <strong>{money(parseFloat(expForm.amount||0)/expForm.splitWith.length,expForm.currency)}/persona</strong>
+                </div>
+              )}
+            </>
+          )}
+
+          {/* CUSTOM MODE */}
+          {expForm.splitMode==="custom"&&(()=>{
+            const total=parseFloat(expForm.amount)||0;
+            const assigned=Math.round(members.reduce((sum,m)=>sum+(parseFloat(expForm.customAmounts?.[m.id])||0),0)*100)/100;
+            const remaining=Math.round((total-assigned)*100)/100;
+            const isBalanced=Math.abs(remaining)<0.01;
+            return (
+              <div>
+                <div style={{fontSize:12,color:"#A7A9BE",marginBottom:10}}>Introduce el importe exacto para cada persona:</div>
+                {members.map(m=>{
+                  const val=expForm.customAmounts?.[m.id]??"";
+                  return (
+                    <div key={m.id} style={{display:"flex",alignItems:"center",gap:10,marginBottom:8}}>
+                      <div style={{width:36,height:36,borderRadius:10,background:"#1C1B29",border:"1px solid #2D2C3E",display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,flexShrink:0}}>{m.avatar}</div>
+                      <div style={{fontSize:14,fontWeight:600,color:"#FFFFFE",minWidth:52}}>{m.name}</div>
+                      <div style={{flex:1,position:"relative"}}>
+                        <input
+                          type="number" inputMode="decimal" placeholder="0.00" value={val}
+                          onChange={e=>{
+                            const newAmts={...expForm.customAmounts,[m.id]:e.target.value};
+                            const sw=members.filter(x=>parseFloat(newAmts[x.id]||0)>0).map(x=>x.id);
+                            setExpForm({...expForm,customAmounts:newAmts,splitWith:sw});
+                          }}
+                          style={{...S.inp,padding:"10px 44px 10px 14px",fontSize:14}}
+                        />
+                        <span style={{position:"absolute",right:12,top:"50%",transform:"translateY(-50%)",fontSize:11,color:"#A7A9BE",pointerEvents:"none"}}>{expForm.currency}</span>
+                      </div>
+                    </div>
+                  );
+                })}
+                {/* Summary */}
+                <div style={{marginTop:6,padding:"10px 14px",borderRadius:12,background:isBalanced?"#34D39914":"#FBBF2414",border:`1px solid ${isBalanced?"#34D39940":"#FBBF2440"}`}}>
+                  <div style={{display:"flex",justifyContent:"space-between",fontSize:13,marginBottom:4}}>
+                    <span style={{color:"#A7A9BE"}}>Asignado</span>
+                    <span style={{fontWeight:700,color:isBalanced?"#34D399":"#FBBF24"}}>{money(assigned,expForm.currency)} / {money(total,expForm.currency)}</span>
+                  </div>
+                  <div style={{display:"flex",justifyContent:"space-between",fontSize:13}}>
+                    <span style={{color:"#A7A9BE"}}>{isBalanced?"✅ Cuadra perfectamente":"⚠️ Diferencia"}</span>
+                    <span style={{fontWeight:700,color:isBalanced?"#34D399":"#F87171"}}>
+                      {isBalanced?"—":(remaining>0?"-":"+")+" "+money(Math.abs(remaining),expForm.currency)}
+                    </span>
+                  </div>
+                  {!isBalanced&&remaining>0&&(()=>{
+                    const zeros=members.filter(m=>!(parseFloat(expForm.customAmounts?.[m.id])||0));
+                    if(zeros.length===0) return null;
+                    return (
+                      <button
+                        onClick={()=>{
+                          const share=Math.round(remaining/zeros.length*100)/100;
+                          const newAmts={...expForm.customAmounts};
+                          zeros.forEach((m,i)=>{
+                            newAmts[m.id]=i===zeros.length-1
+                              ? String(Math.round((remaining-(share*(zeros.length-1)))*100)/100)
+                              : String(share);
+                          });
+                          const sw=members.filter(x=>parseFloat(newAmts[x.id]||0)>0).map(x=>x.id);
+                          setExpForm({...expForm,customAmounts:newAmts,splitWith:sw});
+                        }}
+                        style={{marginTop:8,width:"100%",padding:"7px 0",borderRadius:8,border:"none",background:"#FBBF2422",color:"#FBBF24",fontSize:12,fontWeight:700,cursor:"pointer"}}
+                      >↕ Repartir lo restante entre los que faltan ({zeros.map(m=>m.name).join(", ")})</button>
+                    );
+                  })()}
+                </div>
+              </div>
+            );
+          })()}
+        </div>
+
+        <div style={S.fg}><label style={S.lbl}>Fecha</label><input type="date" style={{...S.inp,fontSize:15,padding:"12px 14px",color:"#FFFFFE",maxWidth:220}} value={expForm.date} onChange={e=>setExpForm({...expForm,date:e.target.value})}/></div>
+        <div style={S.fg}><label style={S.lbl}>Nota (opcional)</label><input style={S.inp} placeholder="Ej: Incluye propina" value={expForm.note} onChange={e=>setExpForm({...expForm,note:e.target.value})}/></div>
+
+        {/* ── FOTOS / TICKETS ── */}
+        {(()=>{
+          const ec=EXP_CATS[expForm.category]||EXP_CATS.otro;
+          const imgs=expForm.images||[];
+          const handleExpImgUpload=(e)=>{
+            const files=Array.from(e.target.files||[]);
+            files.forEach(file=>{
+              const reader=new FileReader();
+              reader.onload=ev=>setExpForm(f=>({...f,images:[...(f.images||[]),ev.target.result]}));
+              reader.readAsDataURL(file);
+            });
+            e.target.value="";
+          }
+          return (
+            <div style={S.fg}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+                <label style={{...S.lbl,marginBottom:0}}>🧾 Tickets / Fotos {imgs.length>0&&<span style={{color:ec.color,fontWeight:700}}>({imgs.length})</span>}</label>
+                <label style={{padding:"6px 14px",borderRadius:10,background:ec.color+"22",border:`1.5px solid ${ec.color}44`,color:ec.color,fontSize:12,fontWeight:700,cursor:"pointer"}}>
+                  + Añadir
+                  <input type="file" accept="image/*" multiple style={{display:"none"}} onChange={handleExpImgUpload}/>
+                </label>
+              </div>
+              {imgs.length===0?(
+                <label style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:8,padding:"20px 16px",borderRadius:14,border:`2px dashed ${ec.color}33`,background:ec.color+"08",cursor:"pointer"}}>
+                  <div style={{fontSize:32}}>🧾</div>
+                  <div style={{fontSize:13,color:"#A7A9BE"}}>Añade fotos de tickets o facturas</div>
+                  <input type="file" accept="image/*" multiple style={{display:"none"}} onChange={handleExpImgUpload}/>
+                </label>
+              ):(
+                <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6}}>
+                  {imgs.map((img,i)=>(
+                    <div key={i} style={{position:"relative",borderRadius:10,overflow:"hidden",aspectRatio:"1",background:"#1C1B29"}}>
+                      <img src={img} alt="" style={{width:"100%",height:"100%",objectFit:"cover",display:"block"}}/>
+                      <button onClick={()=>setExpForm(f=>({...f,images:(f.images||[]).filter((_,j)=>j!==i)}))} style={{position:"absolute",top:4,right:4,width:22,height:22,borderRadius:6,background:"rgba(0,0,0,0.7)",border:"none",color:"#fff",fontSize:12,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
+                    </div>
+                  ))}
+                  <label style={{borderRadius:10,aspectRatio:"1",background:"#1C1B29",border:`2px dashed ${ec.color}44`,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:4,cursor:"pointer"}}>
+                    <div style={{fontSize:22,color:ec.color}}>+</div>
+                    <div style={{fontSize:10,color:"#A7A9BE"}}>Más</div>
+                    <input type="file" accept="image/*" multiple style={{display:"none"}} onChange={handleExpImgUpload}/>
+                  </label>
+                </div>
+              )}
+            </div>
+          );
+        })()}
+
+        <button style={S.primary} onClick={isEdit?updateExp:saveExp}>{isEdit?"Guardar cambios":"Añadir gasto"}</button>
+      </div></div>
+    );
+  }
+
+  // ── ACTIVITY DETAIL ──────────────────────────────────────────────────────────
+  if(view==="actDetail" && activeAct && activeDay && activeTrip) {
+    const tc = TYPE_CONFIG[activeAct.type]||TYPE_CONFIG.actividad;
+    const images = activeAct.images||[];
+
+    return (
+      <div style={S.app}>
+        <style>{`@keyframes spin{to{transform:rotate(360deg)}} .img-del:hover{opacity:1!important}`}</style>
+        <div style={S.scr}>
+
+          {/* Header */}
+          <div style={{background:`linear-gradient(160deg,${tc.color},${tc.color}99)`,padding:"56px 24px 28px",position:"relative"}}>
+            <button style={S.dBack} onClick={()=>setView("detail")}>← Días</button>
+            <div style={{fontSize:52,lineHeight:1,marginBottom:8}}>{tc.emoji}</div>
+            <div style={{fontSize:24,fontWeight:900,color:"#fff",letterSpacing:"-0.4px",lineHeight:1.2}}>{activeAct.title}</div>
+            {/* type pill */}
+            <div style={{marginTop:10,display:"inline-flex",alignItems:"center",gap:6,background:"rgba(255,255,255,0.2)",borderRadius:20,padding:"5px 14px"}}>
+              <span style={{fontSize:12,fontWeight:700,color:"#fff",textTransform:"uppercase",letterSpacing:1}}>{tc.label}</span>
+            </div>
+          </div>
+
+          {/* Info cards row */}
+          <div style={{display:"flex",gap:0,background:"#13121F",borderBottom:"1px solid #1C1B29"}}>
+            {[
+              ["🕐 Hora", activeAct.time||"—"],
+              ["📅 Día",  fmtLong(activeDay.date).split(",")[0]||"—"],
+              ["🖼 Fotos", String(images.length)],
+            ].map(([l,v],i)=>(
+              <div key={i} style={{flex:1,padding:"14px 10px",textAlign:"center",borderRight:i<2?"1px solid #1C1B29":"none"}}>
+                <div style={{fontSize:11,color:"#A7A9BE",marginBottom:3}}>{l}</div>
+                <div style={{fontSize:15,fontWeight:700,color:"#FFFFFE"}}>{v}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Scrollable content */}
+          <div style={{flex:1,overflowY:"auto",padding:"20px 20px 100px",display:"flex",flexDirection:"column",gap:16}}>
+
+            {/* Location */}
+            {activeAct.location&&(
+              <div
+                onClick={()=>window.open(mapsUrl(activeAct.location),"_blank")}
+                style={{background:"#1C4532",border:"1px solid #34D39933",borderRadius:16,padding:"14px 16px",display:"flex",alignItems:"center",gap:12,cursor:"pointer"}}
+              >
+                <div style={{width:40,height:40,borderRadius:11,background:"#34D39922",display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,flexShrink:0}}>📍</div>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{fontSize:11,fontWeight:700,color:"#34D399",textTransform:"uppercase",letterSpacing:1,marginBottom:3}}>Ubicación</div>
+                  <div style={{fontSize:14,fontWeight:600,color:"#FFFFFE",lineHeight:1.4}}>{activeAct.location}</div>
+                  <div style={{fontSize:11,color:"#34D399",marginTop:3}}>Toca para abrir en Google Maps →</div>
+                </div>
+                <div style={{fontSize:20,color:"#34D399",flexShrink:0}}>›</div>
+              </div>
+            )}
+
+            {/* Note */}
+            {activeAct.note&&(
+              <div style={{background:"#1C1B29",borderRadius:16,padding:"16px",border:"1px solid #2D2C3E"}}>
+                <div style={{fontSize:11,fontWeight:700,color:"#A7A9BE",textTransform:"uppercase",letterSpacing:1,marginBottom:8}}>📝 Nota</div>
+                <div style={{fontSize:15,color:"#FFFFFE",lineHeight:1.6}}>{activeAct.note}</div>
+              </div>
+            )}
+
+            {/* Photos section */}
+            <div>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+                <div style={{fontSize:13,fontWeight:700,color:"#A7A9BE",textTransform:"uppercase",letterSpacing:1}}>📸 Fotos</div>
+                {/* Upload button */}
+                <label style={{padding:"7px 14px",borderRadius:12,background:tc.color+"22",border:`1.5px solid ${tc.color}44`,color:tc.color,fontSize:13,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",gap:5}}>
+                  + Añadir foto
+                  <input type="file" accept="image/*" multiple style={{display:"none"}}
+                    onChange={e=>handleImageUpload(activeDay.id, activeAct.id, e)}/>
+                </label>
+              </div>
+
+              {images.length===0&&(
+                <label style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:10,padding:"32px 20px",borderRadius:16,border:`2px dashed ${tc.color}44`,background:tc.color+"0A",cursor:"pointer"}}>
+                  <div style={{fontSize:44}}>📷</div>
+                  <div style={{fontSize:14,fontWeight:600,color:"#A7A9BE"}}>Toca para añadir fotos</div>
+                  <div style={{fontSize:12,color:"#A7A9BE55"}}>Desde tu carrete o cámara</div>
+                  <input type="file" accept="image/*" multiple style={{display:"none"}}
+                    onChange={e=>handleImageUpload(activeDay.id, activeAct.id, e)}/>
+                </label>
+              )}
+
+              {images.length>0&&(
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+                  {images.map((img,i)=>(
+                    <div key={i} style={{position:"relative",borderRadius:12,overflow:"hidden",aspectRatio:"1",background:"#1C1B29"}} onClick={()=>setLightbox(i)}>
+                      <img src={img} alt="" style={{width:"100%",height:"100%",objectFit:"cover",display:"block",cursor:"pointer"}}/>
+                      <button
+                        className="img-del"
+                        onClick={e=>{e.stopPropagation();removeImageFromActivity(activeDay.id,activeAct.id,i);}}
+                        style={{position:"absolute",top:6,right:6,width:26,height:26,borderRadius:8,background:"rgba(0,0,0,0.65)",border:"none",color:"#fff",fontSize:14,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",opacity:0.85}}
+                      >✕</button>
+                    </div>
+                  ))}
+                  {/* Add more tile */}
+                  <label style={{borderRadius:12,aspectRatio:"1",background:"#1C1B29",border:`2px dashed ${tc.color}44`,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:6,cursor:"pointer"}}>
+                    <div style={{fontSize:28,color:tc.color}}>+</div>
+                    <div style={{fontSize:11,color:"#A7A9BE"}}>Añadir</div>
+                    <input type="file" accept="image/*" multiple style={{display:"none"}}
+                      onChange={e=>handleImageUpload(activeDay.id, activeAct.id, e)}/>
+                  </label>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Lightbox */}
+          {lightbox!==null&&(
+            <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.95)",zIndex:999,display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column"}} onClick={()=>setLightbox(null)}>
+              <img src={images[lightbox]} alt="" style={{maxWidth:"100%",maxHeight:"80vh",objectFit:"contain",borderRadius:8}}/>
+              <div style={{color:"#A7A9BE",fontSize:13,marginTop:12}}>{lightbox+1} / {images.length} · Toca para cerrar</div>
+              {images.length>1&&(
+                <div style={{display:"flex",gap:16,marginTop:16}}>
+                  <button onClick={e=>{e.stopPropagation();setLightbox(l=>(l-1+images.length)%images.length);}} style={{background:"#1C1B29",border:"none",color:"#fff",fontSize:24,padding:"8px 18px",borderRadius:12,cursor:"pointer"}}>‹</button>
+                  <button onClick={e=>{e.stopPropagation();setLightbox(l=>(l+1)%images.length);}} style={{background:"#1C1B29",border:"none",color:"#fff",fontSize:24,padding:"8px 18px",borderRadius:12,cursor:"pointer"}}>›</button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Bottom action buttons */}
+          <div style={{position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:430,background:"#0F0E17",borderTop:"1px solid #1C1B29",padding:"12px 20px 28px",display:"flex",gap:10,boxSizing:"border-box"}}>
+            <button
+              style={{flex:1,padding:"13px 0",borderRadius:14,border:"1.5px solid #2D2C3E",background:"#1C1B29",color:"#A7A9BE",fontSize:14,fontWeight:600,cursor:"pointer"}}
+              onClick={()=>{openEditAct(activeDay,activeAct);}}
+            >✏️ Editar actividad</button>
+            <button
+              style={{flex:1,padding:"13px 0",borderRadius:14,border:"1.5px solid #F8717133",background:"#F8717111",color:"#F87171",fontSize:14,fontWeight:600,cursor:"pointer"}}
+              onClick={()=>{deleteAct(activeDay.id,activeAct.id);setView("detail");}}
+            >🗑 Eliminar</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return null;
+}
+
+// ─── SYNC WRAPPER WITH SUPABASE ───────────────────────────────────────────────
+function App() {
+  const [user, setUser]             = useState(null);
+  const [authChecked, setAuthChecked] = useState(false);
+  const [trips, setTrips]           = useState([]);
+  const [syncing, setSyncing]       = useState(false);
+  const [sbError, setSbError]       = useState(false);
+
+  // Check auth on load
+  useEffect(() => {
+    // Timeout — if Supabase doesn't respond in 8s, show error
+    const timeout = setTimeout(() => {
+      if (!authChecked) setSbError(true);
+    }, 8000);
+
+    sb.auth.getSession().then(({ data, error }) => {
+      clearTimeout(timeout);
+      if (error) { setSbError(true); return; }
+      setUser(data.session?.user || null);
+      setAuthChecked(true);
+    }).catch(() => {
+      clearTimeout(timeout);
+      setSbError(true);
+    });
+
+    const { data: listener } = sb.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user || null);
+      setAuthChecked(true);
+    });
+    return () => { clearTimeout(timeout); listener.subscription.unsubscribe(); };
+  }, []);
+
+  // Load + subscribe to trips when user logs in
+  useEffect(() => {
+    if (!user) { setTrips([]); return; }
+
+    // Load from Supabase
+    sb.from('trips')
+      .select('*')
+      .contains('member_ids', [user.id])
+      .order('created_at', { ascending: true })
+      .then(({ data }) => {
+        if (data && data.length > 0) {
+          setTrips(data.map(r => ({ ...r.data, id: r.id, _dbid: r.id, owner_id: r.owner_id, member_ids: r.member_ids, invite_code: r.invite_code })));
+        } else {
+          // First login — load local data if any and migrate
+          const local = loadLocal();
+          if (local.length > 0) {
+            setTrips(local);
+            // migrate local trips to cloud
+            local.forEach(t => saveTrip({ ...t, member_ids: [user.id] }));
+          }
+        }
+      });
+
+    // Real-time subscription
+    const channel = sb.channel('trips-' + user.id)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'trips' }, payload => {
+        if (payload.eventType === 'DELETE') {
+          setTrips(prev => prev.filter(t => t._dbid !== payload.old.id));
+        } else {
+          const row = payload.new;
+          const trip = { ...row.data, id: row.id, _dbid: row.id, owner_id: row.owner_id, member_ids: row.member_ids, invite_code: row.invite_code };
+          setTrips(prev => {
+            const exists = prev.find(t => t._dbid === row.id);
+            if (exists) return prev.map(t => t._dbid === row.id ? trip : t);
+            return [...prev, trip];
+          });
+        }
+      })
+      .subscribe();
+
+    return () => sb.removeChannel(channel);
+  }, [user]);
+
+  // Save trip to Supabase + localStorage
+  const saveTrip = useCallback(async (trip) => {
+    if (!user) return;
+    setSyncing(true);
+    // Always preserve existing member_ids from DB, add current user if missing
+    const existingTrip = trips.find(t => t.id === trip.id);
+    const existingMemberIds = existingTrip?.member_ids || trip.member_ids || [user.id];
+    const memberIds = existingMemberIds.includes(user.id) ? existingMemberIds : [...existingMemberIds, user.id];
+    const payload = {
+      data: { ...trip, member_ids: memberIds },
+      member_ids: memberIds,
+      owner_id: trip.owner_id || user.id,
+      updated_at: new Date().toISOString()
+    };
+    try {
+      if (trip._dbid) {
+        await sb.from('trips').update(payload).eq('id', trip._dbid);
+      } else {
+        const { data } = await sb.from('trips').insert({ ...payload, created_at: new Date().toISOString() }).select().single();
+        if (data) {
+          setTrips(prev => prev.map(t => t.id === trip.id ? { ...trip, _dbid: data.id } : t));
+        }
+      }
+    } catch(e) { console.error('saveTrip error:', e); }
+    setSyncing(false);
+  }, [user, trips]);
+
+  const handleAddTrip = useCallback((trip) => {
+    const newTrip = { ...trip, member_ids: [user?.id], owner_id: user?.id };
+    setTrips(prev => [...prev, newTrip]);
+    saveTrip(newTrip);
+    return newTrip;
+  }, [user, saveTrip]);
+
+  const handleUpdateTrip = useCallback((updated) => {
+    setTrips(prev => prev.map(t => t.id === updated.id ? updated : t));
+    saveTrip(updated);
+  }, [saveTrip]);
+
+  const handleDeleteTrip = useCallback(async (tripId, fullDelete = false) => {
+    const trip = trips.find(t => t.id === tripId);
+    if (!trip?._dbid) { setTrips(prev => prev.filter(t => t.id !== tripId)); return; }
+
+    if (fullDelete) {
+      // Delete completely for everyone
+      setTrips(prev => prev.filter(t => t.id !== tripId));
+      await sb.from('trips').delete().eq('id', trip._dbid);
+    } else {
+      // Just remove current user from member_ids
+      const newMemberIds = (trip.member_ids || []).filter(id => id !== user.id);
+      setTrips(prev => prev.filter(t => t.id !== tripId));
+      if (newMemberIds.length === 0) {
+        // No members left, delete completely
+        await sb.from('trips').delete().eq('id', trip._dbid);
+      } else {
+        const updatedData = { ...(trip || {}), member_ids: newMemberIds };
+        await sb.from('trips').update({ member_ids: newMemberIds, data: updatedData }).eq('id', trip._dbid);
+      }
+    }
+  }, [trips, user]);
+
+  const handleLogout = useCallback(async () => {
+    await sb.auth.signOut();
+    setTrips([]);
+  }, []);
+
+  // ── INVITE SYSTEM ─────────────────────────────────────────────────────────
+  const [showJoin, setShowJoin]       = useState(false);
+  const [joinCode, setJoinCode]       = useState('');
+  const [joinError, setJoinError]     = useState('');
+  const [joinLoading, setJoinLoading] = useState(false);
+  const [joinSuccess, setJoinSuccess] = useState('');
+
+  const generateInviteCode = useCallback(async (trip) => {
+    if (!trip._dbid) return;
+    // Generate random 7-char code
+    const code = Math.random().toString(36).substring(2,9).toUpperCase();
+    try {
+      await sb.from('trips').update({ invite_code: code }).eq('id', trip._dbid);
+      // Update local trip
+      setTrips(prev => prev.map(t => t._dbid === trip._dbid ? { ...t, invite_code: code } : t));
+      return code;
+    } catch(e) { console.error(e); return null; }
+  }, []);
+
+  const joinByCode = useCallback(async (code) => {
+    if (!user || !code.trim()) return;
+    setJoinLoading(true); setJoinError(''); setJoinSuccess('');
+    try {
+      // Use RPC function that bypasses RLS
+      const { data: result, error } = await sb.rpc('join_trip_by_code', {
+        p_code: code.trim().toUpperCase(),
+        p_user_id: user.id
+      });
+      if (error) { setJoinError('Error: ' + error.message); setJoinLoading(false); return; }
+      if (result?.error) { setJoinError(result.error); setJoinLoading(false); return; }
+
+      // Fetch the full trip now that we're a member
+      const { data: tripRow } = await sb.from('trips').select('*').eq('id', result.trip_id).single();
+      if (tripRow) {
+        const trip = { ...tripRow.data, id: tripRow.id, _dbid: tripRow.id, owner_id: tripRow.owner_id, member_ids: tripRow.member_ids, invite_code: tripRow.invite_code };
+        setTrips(prev => {
+          const exists = prev.find(t => t._dbid === tripRow.id);
+          return exists ? prev : [...prev, trip];
+        });
+        setJoinSuccess(`¡Te uniste a "${tripRow.data?.title || 'el viaje'}"! 🎉`);
+      } else {
+        setJoinSuccess('¡Te uniste al viaje! 🎉');
+      }
+      setJoinCode('');
+      setTimeout(() => { setShowJoin(false); setJoinSuccess(''); }, 2500);
+    } catch(e) { setJoinError('Error al unirse: ' + e.message); }
+    setJoinLoading(false);
+  }, [user]);
+
+  if (sbError) return (
+    <div style={{minHeight:'100vh',background:'#0F0E17',display:'flex',alignItems:'center',justifyContent:'center',flexDirection:'column',gap:16,padding:24}}>
+      <div style={{fontSize:56}}>⚠️</div>
+      <div style={{color:'#F87171',fontSize:18,fontWeight:700,textAlign:'center'}}>No se puede conectar</div>
+      <div style={{color:'#A7A9BE',fontSize:14,textAlign:'center',lineHeight:1.6,maxWidth:320}}>
+        No se puede conectar con el servidor. Comprueba tu conexión a internet e inténtalo de nuevo.
+      </div>
+      <button
+        onClick={()=>{ setSbError(false); setAuthChecked(false); window.location.reload(); }}
+        style={{marginTop:8,padding:'13px 28px',background:'#FF6B6B',border:'none',borderRadius:14,color:'#fff',fontSize:15,fontWeight:700,cursor:'pointer',boxShadow:'0 6px 20px rgba(255,107,107,0.35)'}}
+      >🔄 Reintentar</button>
+    </div>
+  );
+
+  if (!authChecked) return (
+    <div style={{minHeight:'100vh',background:'#0F0E17',display:'flex',alignItems:'center',justifyContent:'center',flexDirection:'column',gap:16}}>
+      <div style={{fontSize:56}}>✈️</div>
+      <div style={{color:'#A7A9BE',fontSize:14}}>Cargando...</div>
+      <div style={{width:32,height:32,border:'3px solid #2D2C3E',borderTopColor:'#FF6B6B',borderRadius:'50%',animation:'spin 0.7s linear infinite'}}/>
+    </div>
+  );
+
+  if (!user) return <AuthScreen onLogin={setUser}/>;
+
+  return (
+    <AppInner
+      cloudTrips={trips}
+      onSaveTrip={handleUpdateTrip}
+      onAddTrip={handleAddTrip}
+      onDeleteTrip={handleDeleteTrip}
+      currentUser={{ ...user, displayName: user.user_metadata?.full_name || user.email }}
+      onLogout={handleLogout}
+      syncing={syncing}
+      onGenerateInvite={generateInviteCode}
+      showJoin={showJoin} setShowJoin={setShowJoin}
+      joinCode={joinCode} setJoinCode={setJoinCode}
+      joinError={joinError} joinLoading={joinLoading}
+      joinSuccess={joinSuccess} onJoin={joinByCode}
+    />
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
+</script>
+</body>
+</html>
