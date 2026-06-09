@@ -19,8 +19,10 @@
     @keyframes slideUp{from{transform:translateY(100%)}to{transform:translateY(0)}}
     @keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
   </style>
-  <!-- Supabase SDK -->
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <!-- Firebase SDK -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
   <!-- React -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.development.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.development.js"></script>
@@ -30,15 +32,23 @@
 <div id="root"></div>
 
 <script>
-  // Init Supabase
-  const SUPA_URL = 'https://wdsaxxgfpfoetsqozjuo.supabase.co';
-  const SUPA_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Indkc2F4eGdmcGZvZXRzcW96anVvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM2NjIyODcsImV4cCI6MjA4OTIzODI4N30.tRZfUMIkYx9-EuQ0IzXpRjkky3I364a21R_9xIuvndE';
-  window._supabase = supabase.createClient(SUPA_URL, SUPA_KEY);
+  // Init Firebase
+  firebase.initializeApp({
+    apiKey: "AIzaSyCRhpiN9HuDVSdSBKJF-Wz6xdbP-zgJzLw",
+    authDomain: "mis-viajes-5c796.firebaseapp.com",
+    projectId: "mis-viajes-5c796",
+    storageBucket: "mis-viajes-5c796.firebasestorage.app",
+    messagingSenderId: "4688489200",
+    appId: "1:4688489200:web:c04a3a7309e31da2b3f035"
+  });
+  window._fbAuth = firebase.auth();
+  window._fbDb = firebase.firestore();
 </script>
 
 <script type="text/babel">
 const { useState, useEffect, useMemo, useCallback, useRef } = React;
-const sb = window._supabase;
+const fbAuth = window._fbAuth;
+const fbDb = window._fbDb;
 
 // ─── STORAGE KEY for local fallback ───────────────────────────────────────────
 const LOCAL_KEY = 'mis-viajes-data-v1';
@@ -67,23 +77,24 @@ function AuthScreen({ onLogin }) {
     try {
       if (mode === 'register') {
         if (!name.trim()) { setError('Escribe tu nombre'); setLoading(false); return; }
-        const { data, error: e } = await sb.auth.signUp({ email, password: pass, options: { data: { full_name: name.trim() } } });
-        if (e) throw e;
-        if (data.user && !data.session) { setSent(true); setLoading(false); return; }
-        onLogin(data.user);
+        const cred = await fbAuth.createUserWithEmailAndPassword(email, pass);
+        await cred.user.updateProfile({ displayName: name.trim() });
+        onLogin(cred.user);
       } else {
-        const { data, error: e } = await sb.auth.signInWithPassword({ email, password: pass });
-        if (e) throw e;
-        onLogin(data.user);
+        const cred = await fbAuth.signInWithEmailAndPassword(email, pass);
+        onLogin(cred.user);
       }
     } catch(e) {
       const msgs = {
-        'Invalid login credentials': 'Email o contraseña incorrectos',
-        'User already registered': 'Este email ya está registrado. Inicia sesión.',
-        'Password should be at least 6 characters': 'La contraseña debe tener al menos 6 caracteres',
-        'Unable to validate email address: invalid format': 'El formato del email no es válido',
+        'auth/invalid-credential': 'Email o contraseña incorrectos',
+        'auth/user-not-found': 'No existe ninguna cuenta con este email',
+        'auth/wrong-password': 'Email o contraseña incorrectos',
+        'auth/email-already-in-use': 'Este email ya está registrado. Inicia sesión.',
+        'auth/weak-password': 'La contraseña debe tener al menos 6 caracteres',
+        'auth/invalid-email': 'El formato del email no es válido',
+        'auth/network-request-failed': 'Error de red. Comprueba tu conexión.',
       };
-      setError(msgs[e.message] || e.message);
+      setError(msgs[e.code] || e.message);
     }
     setLoading(false);
   };
@@ -1668,17 +1679,21 @@ ${aiForm.extras?`- Info: ${aiForm.extras}`:""}
 
 Genera 4-5 actividades por día (mañana, mediodía, tarde, noche). Notas cortas. Solo JSON.`;
 
-                        const res=await fetch("https://wdsaxxgfpfoetsqozjuo.supabase.co/functions/v1/claude-proxy",{
+                        const res=await fetch("https://api.groq.com/openai/v1/chat/completions",{
                           method:"POST",
-                          headers:{"Content-Type":"application/json"},
+                          headers:{
+                            "Content-Type":"application/json",
+                            "Authorization":"Bearer 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"
+                          },
                           body:JSON.stringify({
                             model:"llama-3.3-70b-versatile",
                             max_tokens:8000,
+                            response_format:{type:"json_object"},
                             messages:[{role:"user",content:prompt}]
                           })
                         });
                         const data=await res.json();
-                        const text=data.content?.[0]?.text||"";
+                        const text=data.choices?.[0]?.message?.content||"";
                         const clean=text.replace(/```json|```/g,"").trim();
                         const parsed=JSON.parse(clean);
 
@@ -2386,103 +2401,70 @@ Genera 4-5 actividades por día (mañana, mediodía, tarde, noche). Notas cortas
   return null;
 }
 
-// ─── SYNC WRAPPER WITH SUPABASE ───────────────────────────────────────────────
+// ─── SYNC WRAPPER WITH FIREBASE ───────────────────────────────────────────────
 function App() {
   const [user, setUser]             = useState(null);
   const [authChecked, setAuthChecked] = useState(false);
   const [trips, setTrips]           = useState([]);
   const [syncing, setSyncing]       = useState(false);
-  const [sbError, setSbError]       = useState(false);
+  const [fbError, setFbError]       = useState(false);
 
   // Check auth on load
   useEffect(() => {
-    // Timeout — if Supabase doesn't respond in 8s, show error
     const timeout = setTimeout(() => {
-      if (!authChecked) setSbError(true);
-    }, 8000);
+      setAuthChecked(c => { if (!c) setFbError(true); return c; });
+    }, 10000);
 
-    sb.auth.getSession().then(({ data, error }) => {
+    const unsub = fbAuth.onAuthStateChanged(u => {
       clearTimeout(timeout);
-      if (error) { setSbError(true); return; }
-      setUser(data.session?.user || null);
+      if (u) setUser({ id: u.uid, email: u.email, displayName: u.displayName || u.email });
+      else setUser(null);
       setAuthChecked(true);
-    }).catch(() => {
-      clearTimeout(timeout);
-      setSbError(true);
-    });
+    }, () => { clearTimeout(timeout); setFbError(true); });
 
-    const { data: listener } = sb.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user || null);
-      setAuthChecked(true);
-    });
-    return () => { clearTimeout(timeout); listener.subscription.unsubscribe(); };
+    return () => { clearTimeout(timeout); unsub(); };
   }, []);
 
-  // Load + subscribe to trips when user logs in
+  // Load + subscribe to trips when user logs in (Firestore realtime)
   useEffect(() => {
     if (!user) { setTrips([]); return; }
 
-    // Load from Supabase
-    sb.from('trips')
-      .select('*')
-      .contains('member_ids', [user.id])
-      .order('created_at', { ascending: true })
-      .then(({ data }) => {
-        if (data && data.length > 0) {
-          setTrips(data.map(r => ({ ...r.data, id: r.id, _dbid: r.id, owner_id: r.owner_id, member_ids: r.member_ids, invite_code: r.invite_code })));
-        } else {
-          // First login — load local data if any and migrate
-          const local = loadLocal();
-          if (local.length > 0) {
-            setTrips(local);
-            // migrate local trips to cloud
-            local.forEach(t => saveTrip({ ...t, member_ids: [user.id] }));
-          }
-        }
-      });
+    const unsub = fbDb.collection('trips')
+      .where('member_ids', 'array-contains', user.id)
+      .onSnapshot(snap => {
+        const list = snap.docs.map(d => {
+          const r = d.data();
+          return { ...(r.data||{}), id: d.id, _dbid: d.id, owner_id: r.owner_id, member_ids: r.member_ids, invite_code: r.invite_code, _created: r.created_at || '' };
+        });
+        list.sort((a,b) => (a._created||'').localeCompare(b._created||''));
+        setTrips(list);
+      }, err => { console.error('snapshot error:', err); });
 
-    // Real-time subscription
-    const channel = sb.channel('trips-' + user.id)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'trips' }, payload => {
-        if (payload.eventType === 'DELETE') {
-          setTrips(prev => prev.filter(t => t._dbid !== payload.old.id));
-        } else {
-          const row = payload.new;
-          const trip = { ...row.data, id: row.id, _dbid: row.id, owner_id: row.owner_id, member_ids: row.member_ids, invite_code: row.invite_code };
-          setTrips(prev => {
-            const exists = prev.find(t => t._dbid === row.id);
-            if (exists) return prev.map(t => t._dbid === row.id ? trip : t);
-            return [...prev, trip];
-          });
-        }
-      })
-      .subscribe();
-
-    return () => sb.removeChannel(channel);
+    return () => unsub();
   }, [user]);
 
-  // Save trip to Supabase + localStorage
+  // Save trip to Firestore
   const saveTrip = useCallback(async (trip) => {
     if (!user) return;
     setSyncing(true);
-    // Always preserve existing member_ids from DB, add current user if missing
     const existingTrip = trips.find(t => t.id === trip.id);
     const existingMemberIds = existingTrip?.member_ids || trip.member_ids || [user.id];
     const memberIds = existingMemberIds.includes(user.id) ? existingMemberIds : [...existingMemberIds, user.id];
+    const clean = { ...trip };
+    delete clean._dbid; delete clean._created;
     const payload = {
-      data: { ...trip, member_ids: memberIds },
+      data: { ...clean, member_ids: memberIds },
       member_ids: memberIds,
       owner_id: trip.owner_id || user.id,
+      invite_code: trip.invite_code || existingTrip?.invite_code || null,
       updated_at: new Date().toISOString()
     };
     try {
       if (trip._dbid) {
-        await sb.from('trips').update(payload).eq('id', trip._dbid);
+        await fbDb.collection('trips').doc(trip._dbid).update(payload);
       } else {
-        const { data } = await sb.from('trips').insert({ ...payload, created_at: new Date().toISOString() }).select().single();
-        if (data) {
-          setTrips(prev => prev.map(t => t.id === trip.id ? { ...trip, _dbid: data.id } : t));
-        }
+        const ref = await fbDb.collection('trips').add({ ...payload, created_at: new Date().toISOString() });
+        setTrips(prev => prev.map(t => t.id === trip.id ? { ...trip, _dbid: ref.id } : t));
       }
     } catch(e) { console.error('saveTrip error:', e); }
     setSyncing(false);
@@ -2505,25 +2487,23 @@ function App() {
     if (!trip?._dbid) { setTrips(prev => prev.filter(t => t.id !== tripId)); return; }
 
     if (fullDelete) {
-      // Delete completely for everyone
       setTrips(prev => prev.filter(t => t.id !== tripId));
-      await sb.from('trips').delete().eq('id', trip._dbid);
+      await fbDb.collection('trips').doc(trip._dbid).delete();
     } else {
-      // Just remove current user from member_ids
       const newMemberIds = (trip.member_ids || []).filter(id => id !== user.id);
       setTrips(prev => prev.filter(t => t.id !== tripId));
       if (newMemberIds.length === 0) {
-        // No members left, delete completely
-        await sb.from('trips').delete().eq('id', trip._dbid);
+        await fbDb.collection('trips').doc(trip._dbid).delete();
       } else {
-        const updatedData = { ...(trip || {}), member_ids: newMemberIds };
-        await sb.from('trips').update({ member_ids: newMemberIds, data: updatedData }).eq('id', trip._dbid);
+        const clean = { ...trip, member_ids: newMemberIds };
+        delete clean._dbid; delete clean._created;
+        await fbDb.collection('trips').doc(trip._dbid).update({ member_ids: newMemberIds, data: clean });
       }
     }
   }, [trips, user]);
 
   const handleLogout = useCallback(async () => {
-    await sb.auth.signOut();
+    await fbAuth.signOut();
     setTrips([]);
   }, []);
 
@@ -2535,12 +2515,10 @@ function App() {
   const [joinSuccess, setJoinSuccess] = useState('');
 
   const generateInviteCode = useCallback(async (trip) => {
-    if (!trip._dbid) return;
-    // Generate random 7-char code
+    if (!trip._dbid) return null;
     const code = Math.random().toString(36).substring(2,9).toUpperCase();
     try {
-      await sb.from('trips').update({ invite_code: code }).eq('id', trip._dbid);
-      // Update local trip
+      await fbDb.collection('trips').doc(trip._dbid).update({ invite_code: code });
       setTrips(prev => prev.map(t => t._dbid === trip._dbid ? { ...t, invite_code: code } : t));
       return code;
     } catch(e) { console.error(e); return null; }
@@ -2550,33 +2528,26 @@ function App() {
     if (!user || !code.trim()) return;
     setJoinLoading(true); setJoinError(''); setJoinSuccess('');
     try {
-      // Use RPC function that bypasses RLS
-      const { data: result, error } = await sb.rpc('join_trip_by_code', {
-        p_code: code.trim().toUpperCase(),
-        p_user_id: user.id
+      const snap = await fbDb.collection('trips')
+        .where('invite_code', '==', code.trim().toUpperCase())
+        .limit(1).get();
+      if (snap.empty) { setJoinError('Código no encontrado. Comprueba que está bien escrito.'); setJoinLoading(false); return; }
+      const docSnap = snap.docs[0];
+      const r = docSnap.data();
+      if ((r.member_ids || []).includes(user.id)) { setJoinError('Ya eres miembro de este viaje.'); setJoinLoading(false); return; }
+      const newMemberIds = [...(r.member_ids || []), user.id];
+      await fbDb.collection('trips').doc(docSnap.id).update({
+        member_ids: newMemberIds,
+        data: { ...(r.data||{}), member_ids: newMemberIds }
       });
-      if (error) { setJoinError('Error: ' + error.message); setJoinLoading(false); return; }
-      if (result?.error) { setJoinError(result.error); setJoinLoading(false); return; }
-
-      // Fetch the full trip now that we're a member
-      const { data: tripRow } = await sb.from('trips').select('*').eq('id', result.trip_id).single();
-      if (tripRow) {
-        const trip = { ...tripRow.data, id: tripRow.id, _dbid: tripRow.id, owner_id: tripRow.owner_id, member_ids: tripRow.member_ids, invite_code: tripRow.invite_code };
-        setTrips(prev => {
-          const exists = prev.find(t => t._dbid === tripRow.id);
-          return exists ? prev : [...prev, trip];
-        });
-        setJoinSuccess(`¡Te uniste a "${tripRow.data?.title || 'el viaje'}"! 🎉`);
-      } else {
-        setJoinSuccess('¡Te uniste al viaje! 🎉');
-      }
+      setJoinSuccess(`¡Te uniste a "${r.data?.title || 'el viaje'}"! 🎉`);
       setJoinCode('');
       setTimeout(() => { setShowJoin(false); setJoinSuccess(''); }, 2500);
     } catch(e) { setJoinError('Error al unirse: ' + e.message); }
     setJoinLoading(false);
   }, [user]);
 
-  if (sbError) return (
+  if (fbError) return (
     <div style={{minHeight:'100vh',background:'#0F0E17',display:'flex',alignItems:'center',justifyContent:'center',flexDirection:'column',gap:16,padding:24}}>
       <div style={{fontSize:56}}>⚠️</div>
       <div style={{color:'#F87171',fontSize:18,fontWeight:700,textAlign:'center'}}>No se puede conectar</div>
@@ -2584,7 +2555,7 @@ function App() {
         No se puede conectar con el servidor. Comprueba tu conexión a internet e inténtalo de nuevo.
       </div>
       <button
-        onClick={()=>{ setSbError(false); setAuthChecked(false); window.location.reload(); }}
+        onClick={()=>window.location.reload()}
         style={{marginTop:8,padding:'13px 28px',background:'#FF6B6B',border:'none',borderRadius:14,color:'#fff',fontSize:15,fontWeight:700,cursor:'pointer',boxShadow:'0 6px 20px rgba(255,107,107,0.35)'}}
       >🔄 Reintentar</button>
     </div>
@@ -2598,7 +2569,7 @@ function App() {
     </div>
   );
 
-  if (!user) return <AuthScreen onLogin={setUser}/>;
+  if (!user) return <AuthScreen onLogin={u=>setUser({ id: u.uid, email: u.email, displayName: u.displayName || u.email })}/>;
 
   return (
     <AppInner
@@ -2606,7 +2577,7 @@ function App() {
       onSaveTrip={handleUpdateTrip}
       onAddTrip={handleAddTrip}
       onDeleteTrip={handleDeleteTrip}
-      currentUser={{ ...user, displayName: user.user_metadata?.full_name || user.email }}
+      currentUser={user}
       onLogout={handleLogout}
       syncing={syncing}
       onGenerateInvite={generateInviteCode}
